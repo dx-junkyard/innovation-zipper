@@ -1,10 +1,12 @@
 from typing import TypedDict, Dict, Any, List, Optional
 from langgraph.graph import StateGraph, END
+import json
 
 from app.api.components.situation_analyzer import SituationAnalyzer
 from app.api.components.hypothesis_generator import HypothesisGenerator
 from app.api.components.rag_manager import RAGManager
 from app.api.components.response_planner import ResponsePlanner
+from app.api.components.knowledge_manager import KnowledgeManager
 from app.api.ai_client import AIClient
 
 class GraphState(TypedDict):
@@ -12,6 +14,7 @@ class GraphState(TypedDict):
     グラフの状態を保持する型定義。
 
     Attributes:
+        user_id: ユーザーID (for saving memory)
         user_message (str): ユーザーからのメッセージ
         dialog_history (List[Dict[str, Any]]): 会話履歴
         interest_profile (Dict[str, Any]): 興味プロファイル
@@ -20,7 +23,9 @@ class GraphState(TypedDict):
         retrieval_evidence (Optional[Dict[str, Any]]): RAGによる検索結果
         response_plan (Optional[Dict[str, Any]]): 応答計画
         bot_message (Optional[str]): 最終的なボットの応答メッセージ
+        captured_page: Optional[Dict[str, Any]]
     """
+    user_id: str
     user_message: str
     dialog_history: List[Dict[str, Any]]
     interest_profile: Dict[str, Any]
@@ -29,6 +34,7 @@ class GraphState(TypedDict):
     retrieval_evidence: Optional[Dict[str, Any]]
     response_plan: Optional[Dict[str, Any]]
     bot_message: Optional[str]
+    captured_page: Optional[Dict[str, Any]]
 
 class WorkflowManager:
     """
@@ -39,6 +45,7 @@ class WorkflowManager:
         self.hypothesis_generator = HypothesisGenerator(ai_client)
         self.rag_manager = RAGManager(ai_client)
         self.response_planner = ResponsePlanner(ai_client)
+        self.knowledge_manager = KnowledgeManager()
         self.graph = self._build_graph()
 
     def _build_graph(self):
@@ -88,6 +95,26 @@ class WorkflowManager:
     def _situation_analysis_node(self, state: GraphState) -> Dict[str, Any]:
         """状況整理ノード"""
         updated_context = self.situation_analyzer.analyze(state.copy())
+
+        # Memory Consolidation (Synchronous for now)
+        user_id = state.get("user_id")
+        if user_id:
+            interest_profile = updated_context.get("interest_profile")
+            if interest_profile:
+                # Store important interest topics as user memory
+                topics = interest_profile.get("topics", [])
+                intent_goal = interest_profile.get("intent", {}).get("goal")
+
+                if intent_goal:
+                     self.knowledge_manager.add_user_memory(
+                        user_id=user_id,
+                        content=f"User Goal: {intent_goal}",
+                        memory_type="ai_insight",
+                        meta={"source": "situation_analysis"}
+                    )
+
+                # We could loop topics too, but let's keep it simple for now to avoid spamming vector DB
+
         return {
             "interest_profile": updated_context["interest_profile"],
             "active_hypotheses": updated_context["active_hypotheses"]

@@ -1,6 +1,7 @@
 import os
 from typing import Dict, Any, List
 from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, MatchValue, FilterSelector
 from app.api.db import DBClient
 from app.api.ai_client import AIClient
 
@@ -11,7 +12,7 @@ class RAGManager:
     def __init__(self, ai_client: AIClient):
         self.qdrant_host = os.getenv("QDRANT_HOST", "localhost")
         self.qdrant_port = int(os.getenv("QDRANT_PORT", 6333))
-        self.collection_name = "service_catalog"
+        self.collection_name = "knowledge_base" # Updated collection name
         self.qdrant_client = QdrantClient(host=self.qdrant_host, port=self.qdrant_port)
         self.db_client = DBClient()
         self.ai_client = ai_client
@@ -21,68 +22,67 @@ class RAGManager:
         仮説に基づいて知識を検索する。
         """
         hypotheses = context.get("hypotheses", [])
-        retrieval_evidence = {"service_candidates": []}
+        retrieval_evidence = {"results": []}
+        user_id = context.get("user_id", "") # Expect user_id in context
 
         for hypothesis in hypotheses:
-            if hypothesis.get("should_call_rag"):
-                candidates = self._search_services(hypothesis)
-                retrieval_evidence["service_candidates"].extend(candidates)
+            if isinstance(hypothesis, dict) and hypothesis.get("should_call_rag"):
+                results = self._search_knowledge(hypothesis, user_id)
+                retrieval_evidence["results"].extend(results)
 
         context["retrieval_evidence"] = retrieval_evidence
         return context
 
     def _get_embedding(self, text: str) -> List[float]:
         text = text.replace("\n", " ")
-        # Changed from self.openai_client to self.ai_client based on the __init__ modification
         return self.ai_client.get_embedding(text)
 
-    def _search_services(self, hypothesis: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _search_knowledge(self, hypothesis: Dict[str, Any], user_id: str) -> List[Dict[str, Any]]:
         """
-        仮説に基づいてサービスを検索する。
+        仮説に基づいて知識を検索する（権限フィルタ付き）。
         """
-        # 修正箇所: search_query を優先的に使用
-        query_text = hypothesis.get("search_query")
-
-        # search_queryが無い場合のフォールバック（reasoning や likely_services を連結）
-        if not query_text:
-            parts = []
-            if hypothesis.get("reasoning"):
-                parts.append(hypothesis.get("reasoning"))
-            if hypothesis.get("likely_services"):
-                parts.extend(hypothesis.get("likely_services"))
-            query_text = " ".join(parts)
+        query_text = hypothesis.get("search_query") or hypothesis.get("statement")
 
         if not query_text:
             return []
 
         try:
-            # クエリのベクトル化と検索
             query_vector = self._get_embedding(query_text)
+
+            # Filter Logic: Public OR (Private AND current_user)
+            # Qdrant Filter: Should [ (Match public), (Match private AND Match user) ]
+            search_filter = Filter(
+                should=[
+                    FieldCondition(key="visibility", match=MatchValue(value="public")),
+                    Filter(
+                        must=[
+                            FieldCondition(key="visibility", match=MatchValue(value="private")),
+                            FieldCondition(key="user_id", match=MatchValue(value=user_id))
+                        ]
+                    )
+                ]
+            )
 
             search_result = self.qdrant_client.query_points(
                 collection_name=self.collection_name,
                 query=query_vector,
-                limit=3
+                query_filter=search_filter,
+                limit=5
             )
 
             results = []
             for hit in search_result.points:
-                service_id = hit.id
-                service_details = self.db_client.get_service_by_id(service_id)
+                payload = hit.payload
+                source_type = "public_fact" if payload.get("visibility") == "public" else "private_memory"
 
-                if service_details:
-                    results.append({
-                        "hypothesis_id": hypothesis.get("id"),
-                        "service_id": service_id,
-                        "name": service_details.get("title"),
-                        "url": service_details.get("url"), # URLを追加
-                        "summary": service_details.get("service_content") or service_details.get("conditions") or "詳細なし",
-                        "conditions": {
-                            "target": service_details.get("target"),
-                            "conditions": service_details.get("conditions")
-                        },
-                        "score": hit.score
-                    })
+                results.append({
+                    "hypothesis_id": hypothesis.get("id"),
+                    "source_type": source_type,
+                    "type": payload.get("type"),
+                    "content": payload.get("content"),
+                    "meta": payload.get("meta"),
+                    "score": hit.score
+                })
             return results
 
         except Exception as e:

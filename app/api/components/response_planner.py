@@ -27,9 +27,6 @@ class ResponsePlanner:
         """
         prompt = self._create_prompt(context)
 
-        # The prompt asks for a string directly now
-        # However, AIClient.generate_response might try to parse JSON if configured so,
-        # but here we can handle both.
         result = self.ai_client.generate_response(prompt)
 
         bot_message = "申し訳ありません、うまく応答を生成できませんでした。"
@@ -45,10 +42,19 @@ class ResponsePlanner:
         """
         LLMへのプロンプトを作成する。
         """
-        # テンプレートに渡す変数を事前にJSON文字列化
         interest_profile_str = json.dumps(context.get('interest_profile', {}), ensure_ascii=False, indent=2)
         active_hypotheses_str = json.dumps(context.get('active_hypotheses', {}), ensure_ascii=False, indent=2)
         hypotheses_str = json.dumps(context.get('hypotheses', []), ensure_ascii=False, indent=2)
+
+        # Format retrieval evidence with tags [MEMORY] / [FACT]
+        retrieval_evidence = context.get('retrieval_evidence', {}).get('results', [])
+        formatted_evidence = []
+        for item in retrieval_evidence:
+            source_tag = "[FACT]" if item.get("source_type") == "public_fact" else "[MEMORY]"
+            content = item.get("content", "")[:300] # Truncate for prompt
+            formatted_evidence.append(f"{source_tag} {content}")
+
+        retrieval_evidence_str = "\n".join(formatted_evidence)
 
         captured_page = context.get("captured_page", {}) or {}
         page_title = captured_page.get("title", "No page detected")
@@ -57,5 +63,6 @@ class ResponsePlanner:
             interest_profile=interest_profile_str,
             active_hypotheses=active_hypotheses_str,
             hypotheses=hypotheses_str,
-            page_title=page_title
+            page_title=page_title,
+            retrieval_evidence=retrieval_evidence_str
         )

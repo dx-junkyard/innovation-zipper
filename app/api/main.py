@@ -12,6 +12,7 @@ load_dotenv()
 from app.api.ai_client import AIClient
 from app.api.db import DBClient
 from app.api.state_manager import StateManager
+from app.api.components.knowledge_manager import KnowledgeManager
 from pydantic import BaseModel, Field, HttpUrl
 
 app = FastAPI()
@@ -34,6 +35,9 @@ class CaptureRequest(BaseModel):
 @app.post("/api/v1/webhook/capture")
 async def capture_webhook(payload: CaptureRequest):
     repo = DBClient()
+    knowledge_manager = KnowledgeManager()
+
+    # Save raw capture
     capture_id = repo.save_captured_page(
         user_id=payload.user_id,
         url=payload.url,
@@ -44,7 +48,41 @@ async def capture_webhook(payload: CaptureRequest):
     if not capture_id:
         raise HTTPException(status_code=500, detail="Failed to save captured page")
 
-    return {"status": "success", "capture_id": capture_id}
+    # Process for Knowledge Base (L1/L3)
+    # Simple logic: check domain for Public status
+    visibility = "private"
+    memory_type = "user_hypothesis" # Treating captured content as user-related context
+
+    # Example logic for public domains (extend as needed)
+    trusted_domains = [".go.jp", ".ac.jp"]
+    if any(payload.url.endswith(domain) or f"{domain}/" in payload.url for domain in trusted_domains):
+        visibility = "public"
+        memory_type = "shared_fact"
+
+    # Summarize content (Simple truncation for now, could use LLM)
+    summary_content = f"Title: {payload.title}\nURL: {payload.url}\n\n{payload.content[:1000]}"
+
+    meta = {
+        "source_url": payload.url,
+        "title": payload.title,
+        "capture_id": capture_id
+    }
+
+    if visibility == "public":
+        knowledge_manager.add_shared_fact(
+            content=summary_content,
+            source="webhook_capture",
+            meta=meta
+        )
+    else:
+        knowledge_manager.add_user_memory(
+            user_id=payload.user_id,
+            content=summary_content,
+            memory_type=memory_type,
+            meta=meta
+        )
+
+    return {"status": "success", "capture_id": capture_id, "visibility": visibility}
 
 
 # ユーザー登録エンドポイント
@@ -99,6 +137,7 @@ async def post_usermessage(request: Request) -> str:
         interest_profile=current_state["interest_profile"],
         active_hypotheses=current_state["active_hypotheses"]
     )
+    initial_state["user_id"] = user_id # Add user_id to state
 
     # Check for latest captured page context
     latest_page = repo.get_latest_captured_page(user_id)
@@ -162,6 +201,7 @@ async def post_usermessage_stream(request: Request) -> StreamingResponse:
         interest_profile=current_state["interest_profile"],
         active_hypotheses=current_state["active_hypotheses"]
     )
+    initial_state["user_id"] = user_id # Add user_id to state
 
     # Check for latest captured page context
     latest_page = repo.get_latest_captured_page(user_id)
