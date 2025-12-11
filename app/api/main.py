@@ -1,9 +1,11 @@
 from copy import deepcopy
 import json
 from fastapi import FastAPI, Request, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from typing import Any, Dict, List, Optional
 import logging
 import os
+import requests
 from dotenv import load_dotenv
 
 # .env ファイルを読み込む
@@ -16,6 +18,15 @@ from app.api.components.knowledge_manager import KnowledgeManager
 from pydantic import BaseModel, Field, HttpUrl
 
 app = FastAPI()
+
+# CORS設定
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ログ設定
 logging.basicConfig(level=logging.INFO)
@@ -30,6 +41,62 @@ class CaptureRequest(BaseModel):
     title: str
     content: str
     screenshot_url: Optional[str] = None
+
+
+class LineLoginRequest(BaseModel):
+    code: str
+    redirect_uri: str
+
+
+@app.post("/api/v1/auth/line")
+def line_auth(request: LineLoginRequest):
+    line_client_id = os.getenv("LINE_CHANNEL_ID")
+    line_client_secret = os.getenv("LINE_CHANNEL_SECRET")
+
+    if not line_client_id or not line_client_secret:
+        raise HTTPException(status_code=500, detail="LINE credentials not configured")
+
+    # 1. Access Token取得
+    token_url = "https://api.line.me/oauth2/v2.1/token"
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    data = {
+        "grant_type": "authorization_code",
+        "code": request.code,
+        "redirect_uri": request.redirect_uri,
+        "client_id": line_client_id,
+        "client_secret": line_client_secret,
+    }
+
+    try:
+        response = requests.post(token_url, headers=headers, data=data)
+        response.raise_for_status()
+        token_data = response.json()
+        access_token = token_data.get("access_token")
+    except requests.exceptions.RequestException as e:
+        error_msg = f"Failed to get access token: {e}"
+        if 'response' in locals():
+             error_msg += f", response: {response.text}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=400, detail="Failed to get access token from LINE")
+
+    # 2. Profile取得
+    profile_url = "https://api.line.me/v2/profile"
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    try:
+        response = requests.get(profile_url, headers=headers)
+        response.raise_for_status()
+        profile_data = response.json()
+        line_user_id = profile_data.get("userId")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to get user profile: {e}")
+        raise HTTPException(status_code=400, detail="Failed to get user profile from LINE")
+
+    # 3. DB連携
+    repo = DBClient()
+    user_id = repo.create_user(line_user_id=line_user_id)
+
+    return {"user_id": user_id}
 
 
 @app.post("/api/v1/webhook/capture")
