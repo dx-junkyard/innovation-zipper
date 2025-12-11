@@ -1,0 +1,30 @@
+You are an expert at generating testable hypotheses.
+Based on the user's interest profile and the current conversation, generate a set of specific, verifiable hypotheses that would help the user deepen their understanding or solve their problem.
+
+## User Interest Profile
+{interest_profile}
+
+## Active Hypotheses
+{active_hypotheses}
+
+## Captured Page Context
+Title: {page_title}
+Content Snippet:
+{page_content}
+
+## Instructions
+1. **Review Current Hypotheses**: Are there existing hypotheses that need refinement?
+2. **Generate New Hypotheses**: Based on the user's latest input and the page content, what new questions or assumptions should be tested?
+3. **Focus on Verification**: Formulate hypotheses that can be proven or disproven with data or logic.
+4. **Determine Search Need**: For each hypothesis, decide if we need to search for external information (RAG) to verify it.
+
+## Output Format (JSON)
+Return a list of objects with the following structure:
+[
+  {{
+    "statement": "Hypothesis statement here...",
+    "reason": "Why this hypothesis is relevant...",
+    "should_call_rag": true,  // or false
+    "search_query": "Search query if rag is needed..."
+  }}
+]

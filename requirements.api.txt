@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+requests
+mysql-connector-python
+openai
+python-dotenv
+beautifulsoup4
+langgraph
+langchain-core
+qdrant-client
+python-multipart

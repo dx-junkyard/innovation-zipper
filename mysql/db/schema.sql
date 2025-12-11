@@ -1,0 +1,16 @@
+CREATE TABLE IF NOT EXISTS users (
+    id VARCHAR(36) NOT NULL,
+    line_user_id VARCHAR(255) UNIQUE,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+CREATE TABLE IF NOT EXISTS user_states (
+    user_id VARCHAR(36) NOT NULL,
+    interest_profile JSON NOT NULL,
+    active_hypotheses JSON NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id),
+    CONSTRAINT fk_user_states_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
