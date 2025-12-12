@@ -3,9 +3,9 @@
 
 import os
 
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-5-nano")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-EMBEDDING_DIMENSION = int(os.getenv("EMBEDDING_DIMENSION", 1536))
+LLM_MODEL = os.getenv("LLM_MODEL") or "gpt-5-nano"
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL") or "text-embedding-3-small"
+EMBEDDING_DIMENSION = int(os.getenv("EMBEDDING_DIMENSION") or 1536)
 AI_URL = "http://host.docker.internal:11434"
 
 DB_HOST = os.getenv("DB_HOST", "db")

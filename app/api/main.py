@@ -17,6 +17,16 @@ from pydantic import BaseModel, Field, HttpUrl
 
 app = FastAPI()
 
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # ログ設定
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -84,6 +94,10 @@ async def capture_webhook(payload: CaptureRequest):
 
     return {"status": "success", "capture_id": capture_id, "visibility": visibility}
 
+# health
+@app.get("/health")
+async def health(request: Request) -> Dict[str, str]:
+    return {"status": "ok"}
 
 # ユーザー登録エンドポイント
 @app.post("/api/v1/users")

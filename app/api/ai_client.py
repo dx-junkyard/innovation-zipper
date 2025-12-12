@@ -35,6 +35,10 @@ class AIClient:
         else:
             logger.warning("OPENAI_API_KEY not found in environment variables.")
 
+        # Debug logging for model
+        logger.info(f"AIClient model: '{self.model}' (type: {type(self.model)})")
+        logger.info(f"Env LLM_MODEL: '{os.environ.get('LLM_MODEL')}'")
+
         if openai_api_key:
             self.openai_client = OpenAI(api_key=openai_api_key)
             logger.info("AIClient initialized with OpenAI API")
@@ -68,6 +72,14 @@ class AIClient:
         return None
 
 
+    @staticmethod
+    def _is_reasoning_model(model: str) -> bool:
+        """
+        モデルが推論モデル（Reasoning Model）かどうかを判定する。
+        現在は gpt-5 系のみを対象とする。
+        """
+        return model.startswith("gpt-5") or model.startswith("o1")
+
     def generate_response(self, prompt: str) -> Optional[Dict[str, Any]]:
         """
         LLMを使用して応答を生成する汎用メソッド。
@@ -82,15 +94,48 @@ class AIClient:
 
         if self.openai_client:
             try:
-                response = self.openai_client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": "You are a helpful assistant."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    response_format={"type": "json_object"}
-                )
-                raw_text = response.choices[0].message.content.strip()
+                if self._is_reasoning_model(self.model):
+                    # GPT-5 specific connection
+                    response = self.openai_client.responses.create(
+                        model=self.model,
+                        reasoning={"effort": "medium"},
+                        input=[
+                            {"role": "user", "content": prompt}
+                        ]
+                    )
+                    # Helper to find output text in list of response items
+                    raw_text = ""
+                    # The response object has an 'output' attribute which is a list of items
+                    try:
+                        if hasattr(response, "output") and isinstance(response.output, list):
+                            for item in response.output:
+                                if hasattr(item, "type") and item.type == "message":
+                                    # This is likely ResponseOutputMessage
+                                    if hasattr(item, "content"):
+                                        for content_item in item.content:
+                                            if hasattr(content_item, "type") and content_item.type == "output_text":
+                                                raw_text = content_item.text
+                                                break
+                                if raw_text:
+                                    break
+                        
+                        if not raw_text:
+                            logger.warning("Could not find output_text in response.output list, dumping raw response.")
+                            raw_text = str(response)
+
+                    except Exception as e:
+                        logger.error(f"Error parsing GPT-5 response: {e}")
+                        raw_text = str(response)
+                else:
+                    response = self.openai_client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": "You are a helpful assistant."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        response_format={"type": "json_object"}
+                    )
+                    raw_text = response.choices[0].message.content.strip()
                 logger.info("OpenAI response raw text: %s", raw_text)
             except Exception as exc:
                 logger.error("[✗] OpenAI API request failed: %s", exc)

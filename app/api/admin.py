@@ -2,6 +2,10 @@ from fastapi import FastAPI, HTTPException, Request
 from typing import Dict, Any, List
 from app.api.components.knowledge_manager import KnowledgeManager
 import logging
+from dotenv import load_dotenv  # 追加
+
+# .env ファイルを読み込む
+load_dotenv()
 
 app = FastAPI()
 

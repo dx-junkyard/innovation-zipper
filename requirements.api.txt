@@ -1,5 +1,5 @@
 fastapi
-uvicorn
+uvicorn[standard]
 requests
 mysql-connector-python
 openai
@@ -9,3 +9,4 @@ langgraph
 langchain-core
 qdrant-client
 python-multipart
+

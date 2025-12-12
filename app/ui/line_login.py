@@ -114,5 +114,6 @@ def ensure_login() -> None:
     logger.info("Generated OAuth state: %s", state)
     login_url = _login_url(state)
     logger.info("Login URL: %s", login_url)
-    st.markdown(f"[LINE Login]({login_url})")
+    #st.markdown(f"[LINE Login]({login_url})")
+    st.link_button("LINE Login",login_url)
     st.stop()

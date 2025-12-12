@@ -12,8 +12,6 @@ services:
       - QDRANT_PORT=6333
       - DB_HOST=db
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - LLM_MODEL=${LLM_MODEL}
-      - EMBEDDING_MODEL=${EMBEDDING_MODEL}
     volumes:
       - .:/app
 
@@ -29,8 +27,6 @@ services:
       - QDRANT_PORT=6333
       - DB_HOST=db
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - LLM_MODEL=${LLM_MODEL}
-      - EMBEDDING_MODEL=${EMBEDDING_MODEL}
     volumes:
       - .:/app
 

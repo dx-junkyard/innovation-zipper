@@ -41,6 +41,8 @@ class ChatUI:
         ensure_login()
         st.set_page_config(page_title="AI チャットアプリ", page_icon="🤖")
 
+        ensure_login()
+
         if "messages" not in st.session_state:
             st.session_state.messages = [
                 {"role": "assistant", "content": "こんにちは！何かお困りのことはありますか？"}
