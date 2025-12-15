@@ -1,0 +1,8 @@
+生成された亜種を強制結合し、論理的かつ意外性のある仮説を構築します。
+出力フォーマット:
+{
+  "innovation_hypotheses": [
+    {"title": "...", "logic": "...", "insight": "..."}
+  ],
+  "bot_message": "Markdown形式でのプレゼンテーション..."
+}

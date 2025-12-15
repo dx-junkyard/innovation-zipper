@@ -1,0 +1,9 @@
+構造分解された要素に対し、SCAMPER法や異分野アナロジーを用いて「亜種」を大量生成します。
+出力フォーマット:
+{
+  "idea_variants": {
+    "agent_variants": ["...", "..."],
+    "mechanism_variants": ["...", "..."],
+    "context_variants": ["...", "..."]
+  }
+}

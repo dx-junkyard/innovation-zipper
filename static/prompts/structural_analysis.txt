@@ -1,0 +1,11 @@
+ユーザーの課題をシステム思考に基づき構造分解します。
+出力フォーマット:
+{
+  "structural_analysis": {
+    "agent": "主体（誰の問題か）",
+    "pain": "現象（何が痛点か）",
+    "hidden_incentive": "隠れた報酬（現状維持バイアス）",
+    "structural_constraints": "構造的制約",
+    "system_loop": "悪循環の構造（A→B→A）"
+  }
+}
