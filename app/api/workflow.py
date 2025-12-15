@@ -16,6 +16,7 @@ from app.api.components.structural_analyzer import StructuralAnalyzer
 from app.api.components.variant_generator import VariantGenerator
 from app.api.components.innovation_synthesizer import InnovationSynthesizer
 from app.api.components.report_generator import ReportGenerator
+from app.api.components.interest_explorer import InterestExplorer
 
 class GraphState(TypedDict):
     """
@@ -73,6 +74,7 @@ class WorkflowManager:
         self.variant_generator = VariantGenerator(ai_client)
         self.innovation_synthesizer = InnovationSynthesizer(ai_client)
         self.report_generator = ReportGenerator(ai_client)
+        self.interest_explorer = InterestExplorer(ai_client)
 
         self.graph = self._build_graph()
 
@@ -84,6 +86,7 @@ class WorkflowManager:
 
         # ノードの定義 (Common / Research)
         workflow.add_node("intent_router", self._intent_router_node)
+        workflow.add_node("discovery_exploration", self._discovery_exploration_node)
         workflow.add_node("situation_analysis", self._situation_analysis_node)
         workflow.add_node("hypothesis_generation", self._hypothesis_generation_node)
         workflow.add_node("rag_retrieval", self._rag_retrieval_node)
@@ -105,6 +108,7 @@ class WorkflowManager:
             "intent_router",
             self._route_intent,
             {
+                "discovery": "discovery_exploration",
                 "research": "situation_analysis",
                 "innovation": "structural_analysis",
                 "report": "report_generation"
@@ -132,6 +136,9 @@ class WorkflowManager:
         # --- Report Flow ---
         workflow.add_edge("report_generation", END)
 
+        # --- Discovery Flow ---
+        workflow.add_edge("discovery_exploration", END)
+
         return workflow.compile()
 
     def invoke(self, initial_state: Dict[str, Any]) -> Dict[str, Any]:
@@ -149,7 +156,13 @@ class WorkflowManager:
 
     def _route_intent(self, state: GraphState) -> str:
         """条件付きエッジのためのルーティング関数"""
-        return state.get("mode", "innovation")
+        return state.get("mode", "discovery")
+
+    def _discovery_exploration_node(self, state: GraphState) -> Dict[str, Any]:
+        result = self.interest_explorer.explore(state.copy())
+        # AIが遷移を提案した場合、返答にそれを含める。
+        # 次のターンのRouterでユーザーの同意があればモードが変わる運用。
+        return {"bot_message": result["bot_message"]}
 
     # Research Nodes
     def _situation_analysis_node(self, state: GraphState) -> Dict[str, Any]:

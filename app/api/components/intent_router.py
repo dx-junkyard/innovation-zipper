@@ -17,14 +17,17 @@ class IntentRouter:
         user_message = context.get("user_message", "")
         captured_page = context.get("captured_page", {})
 
-        # 1. Report Mode
-        if "まとめて" in user_message or "レポート" in user_message:
+        # 1. Report Check
+        if any(w in user_message for w in ["まとめて", "レポート", "議事録"]):
             return "report"
 
-        # 2. Research Mode
-        # captured_page があり「このページ」等の言及があれば
-        if captured_page and ("このページ" in user_message or "記事" in user_message):
+        # 2. Research Check (Extension流入)
+        if captured_page and any(w in user_message for w in ["このページ", "記事", "読んで"]):
             return "research"
 
-        # 3. Innovation Mode (Default)
-        return "innovation"
+        # 3. Explicit Innovation Check (強い開始意志)
+        if any(w in user_message for w in ["課題解決", "アイデア出し", "ブレスト", "構造分解", "仮説"]):
+             return "innovation"
+
+        # 4. Default -> Discovery (New!)
+        return "discovery"

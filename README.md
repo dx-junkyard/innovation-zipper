@@ -1,21 +1,21 @@
 # AI Agent Development Playground (Multimodal Agent)
 
-このプロジェクトは、ユーザーの意図に合わせて思考モードを切り替える**マルチモーダルAIエージェント**です。
-ユーザーが閲覧しているWebページの文脈（Research）、新しいアイデアの創出（Innovation）、そして会話のまとめ（Report）という3つのモードを、LangGraphを用いたステートフルなワークフローで統合しています。
+このプロジェクトは、ユーザーとの対話を通じて「没入感（Immersion）」と「真実への接近（Truth）」のスイートスポットを探り、最適な思考モードへ誘導するマルチモーダルAIエージェントです。
 
-## 主な機能
+## モード構成
 
-1.  **Innovation Mode (Default)**:
-    -   **構造分解**: ユーザーの課題をシステム思考に基づき「主体」「痛点」「隠れた報酬」「構造的制約」「悪循環」に分解します。
-    -   **亜種生成**: SCAMPER法や異分野アナロジーを用いて、分解された要素から大量のアイデア亜種を生成します。
-    -   **強制結合**: 亜種を組み合わせて、論理的かつ意外性のあるイノベーション仮説を構築・提案します。
+1.  **Discovery Mode (Default)**:
+    -   **探索**: ユーザーとの雑談を通じて、個人的な熱量（Immersion）と構造的な課題（Truth）が交差するテーマを探ります。
+    -   **誘導**: 機運が高まった段階で、解決（Innovation）や調査（Research）への移行を提案します。
 
-2.  **Research Mode**:
-    -   **Web閲覧コンテキストの連携**: Chrome Extension等から取得したページ情報（URL, タイトル, コンテンツ）を分析します。
-    -   **仮説検証**: ユーザーの関心事項を分析し、検証すべき仮説を立案・提示します。必要に応じてRAG（検索拡張生成）を行います。
+2.  **Innovation Mode**:
+    -   **構造分解・発想**: 課題をシステム思考で分解し、強制発想によりイノベーティブな仮説を生成します。
 
-3.  **Report Mode**:
-    -   **レポート生成**: これまでの会話履歴、構造分析、生成された仮説を統合し、Markdown形式のレポートを出力します。
+3.  **Research Mode**:
+    -   **調査・検証**: Webページ情報やRAGを用いて、仮説の事実確認を行います。
+
+4.  **Report Mode**:
+    -   **統合**: 議論の成果をレポートとして出力します。
 
 ## アーキテクチャ (LangGraph)
 
@@ -26,9 +26,12 @@
 1.  **Intent Routing**:
     -   ユーザー発話に「まとめて」「レポート」が含まれる → **Report Mode**
     -   Webページコンテキストがあり、「このページ」等の言及がある → **Research Mode**
-    -   それ以外 → **Innovation Mode** (デフォルト)
+    -   「課題解決」「ブレスト」等の強い開始意志がある → **Innovation Mode**
+    -   それ以外 → **Discovery Mode** (デフォルト)
 
 2.  **Workflows**:
+    -   **Discovery Flow**:
+        `InterestExplorer` (関心探索)
     -   **Innovation Flow**:
         `StructuralAnalyzer` (構造分解) → `VariantGenerator` (亜種生成) → `InnovationSynthesizer` (仮説構築)
     -   **Research Flow**:
@@ -47,6 +50,7 @@
 │   │   ├── ai_client.py        # LLM への問い合わせロジック
 │   │   ├── components/         # エージェントコンポーネント
 │   │   │   ├── intent_router.py        # 意図判定・ルーティング
+│   │   │   ├── interest_explorer.py    # [Discovery] 関心探索 (New)
 │   │   │   ├── structural_analyzer.py  # [Innovation] 構造分解
 │   │   │   ├── variant_generator.py    # [Innovation] 亜種生成
 │   │   │   ├── innovation_synthesizer.py # [Innovation] 仮説統合
@@ -57,6 +61,7 @@
 │   │   │   └── response_planner.py     # [Research] 応答設計
 │   └── ui/                     # Streamlit フロントエンド
 ├── static/prompts/             # LLM プロンプトテンプレート
+│   ├── interest_exploration.txt # (New)
 │   ├── structural_analysis.txt
 │   ├── variant_generation.txt
 │   ├── innovation_synthesis.txt
