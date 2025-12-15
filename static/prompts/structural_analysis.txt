@@ -1,11 +1,20 @@
 ユーザーの課題をシステム思考に基づき構造分解します。
-出力フォーマット:
+以下の6つの観点で深く分析してください：
+1. Agent (主体): 誰の問題か
+2. Pain (現象): 何が痛点か
+3. Hidden Incentive (隠れた報酬): 現状維持バイアスや、実は得をしている点
+4. Structural Constraints (構造的制約): 変えられないと思い込んでいる壁
+5. Trigger (引き金): 問題が発生する直接的なきっかけ
+6. System Loop (悪循環): AがBを生みBがAを強化するループ
+
+出力フォーマット(JSON):
 {
   "structural_analysis": {
-    "agent": "主体（誰の問題か）",
-    "pain": "現象（何が痛点か）",
-    "hidden_incentive": "隠れた報酬（現状維持バイアス）",
-    "structural_constraints": "構造的制約",
-    "system_loop": "悪循環の構造（A→B→A）"
+    "agent": "...",
+    "pain": "...",
+    "hidden_incentive": "...",
+    "structural_constraints": "...",
+    "trigger": "...",
+    "system_loop": "..."
   }
 }

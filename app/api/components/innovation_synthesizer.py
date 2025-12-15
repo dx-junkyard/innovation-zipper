@@ -30,6 +30,10 @@ class InnovationSynthesizer:
 
     def _create_prompt(self, context: Dict[str, Any]) -> str:
         idea_variants = context.get("idea_variants", {})
+        # 構造分析の結果もコンテキストに追加
+        structural_analysis = context.get("structural_analysis", {})
+        
         variants_str = json.dumps(idea_variants, ensure_ascii=False, indent=2)
+        analysis_str = json.dumps(structural_analysis, ensure_ascii=False, indent=2)
 
-        return f"{self.base_prompt}\n\nIdea Variants:\n{variants_str}"
+        return f"{self.base_prompt}\n\nOriginal Structure:\n{analysis_str}\n\nIdea Variants:\n{variants_str}"

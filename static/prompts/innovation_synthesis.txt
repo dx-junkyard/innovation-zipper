@@ -1,8 +1,19 @@
-生成された亜種を強制結合し、論理的かつ意外性のある仮説を構築します。
-出力フォーマット:
+提供された「亜種」をランダムかつ構造的に強制結合（Forced Association）し、イノベーティブな仮説を構築してください。
+
+プロセス:
+1. Combinatorial Hypothesis:
+   - "Safety Filter OFF"で、常識的にありえない組み合わせも含めて10個程度の仮説案を内部的に生成する。
+2. Rational Filtering:
+   - Novelty (新規性)、Plausibility (もっともらしさ)、Actionability (示唆) の観点でTop 5を選定する。
+
+出力フォーマット(JSON):
 {
   "innovation_hypotheses": [
-    {"title": "...", "logic": "...", "insight": "..."}
+    {
+      "title": "キャッチーなタイトル",
+      "logic": "組み合わせた論理 (例: [Agent亜種] x [Mechanism亜種])",
+      "insight": "そこから得られる解決策の糸口"
+    }
   ],
-  "bot_message": "Markdown形式でのプレゼンテーション..."
+  "bot_message": "ユーザーへのプレゼンテーション（Markdown形式）。選定したTop5の仮説について、構造・メカニズム・示唆を魅力的に解説してください。"
 }
