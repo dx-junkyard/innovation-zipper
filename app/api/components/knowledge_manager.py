@@ -26,6 +26,41 @@ class KnowledgeManager:
         self.qdrant_client = QdrantClient(host=self.qdrant_host, port=self.qdrant_port)
         self.vector_size = EMBEDDING_DIMENSION
 
+    def is_duplicate_content(self, content: str, threshold: float = 0.98) -> bool:
+        """
+        Check if similar content already exists in the knowledge base using vector similarity.
+        """
+        # Save time if content is empty
+        if not content.strip():
+            return False
+
+        # Generate embedding as in add_user_memory
+        vector = self.ai_client.get_embedding(content)
+        if not vector:
+            return False
+        
+        # Search Qdrant
+        try:
+            if not self.qdrant_client.collection_exists(self.collection_name):
+                return False
+
+            results = self.qdrant_client.search(
+                collection_name=self.collection_name,
+                query_vector=vector,
+                limit=1,
+                with_payload=False # Payload not needed for score check
+            )
+            
+            # Check if top match exceeds threshold
+            if results and results[0].score >= threshold:
+                return True
+            
+        except Exception as e:
+            print(f"[!] Qdrant duplicate check failed: {e}")
+            return False
+            
+        return False
+
     def _setup_qdrant_collection(self):
         """Create Qdrant collection if it doesn't exist."""
         if not self.qdrant_client.collection_exists(self.collection_name):
