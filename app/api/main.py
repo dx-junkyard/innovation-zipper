@@ -53,6 +53,12 @@ async def capture_webhook(payload: CaptureRequest):
     repo = DBClient()
     knowledge_manager = KnowledgeManager()
 
+    # Check for duplicate content (Vector Similarity)
+    # This prevents storing re-prints or slight variations of the same content
+    if knowledge_manager.is_duplicate_content(payload.content):
+        logger.info(f"Duplicate content detected for URL: {payload.url}")
+        return {"status": "skipped", "reason": "duplicate_content_detected", "matches": "high_similarity"}
+
     # Save raw capture
     capture_id = repo.save_captured_page(
         user_id=payload.user_id,
