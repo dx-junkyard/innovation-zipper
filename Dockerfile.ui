@@ -15,7 +15,6 @@ RUN pip install --no-cache-dir -r requirements.ui.txt
 
 # Copy application code
 COPY app/ui/ ./app/ui/
-COPY app/api/line_login.py ./app/ui/line_login.py
 
 # Run Streamlit
 CMD ["streamlit", "run", "app/ui/ui.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
