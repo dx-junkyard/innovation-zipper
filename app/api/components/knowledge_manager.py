@@ -44,15 +44,14 @@ class KnowledgeManager:
             if not self.qdrant_client.collection_exists(self.collection_name):
                 return False
 
-            results = self.qdrant_client.search(
+            results = self.qdrant_client.query_points(
                 collection_name=self.collection_name,
-                query_vector=vector,
-                limit=1,
-                with_payload=False # Payload not needed for score check
+                query=vector,
+                limit=1
             )
             
-            # Check if top match exceeds threshold
-            if results and results[0].score >= threshold:
+            # query_points returns a QueryResponse object, access points via .points
+            if results.points and results.points[0].score >= threshold:
                 return True
             
         except Exception as e:
@@ -69,7 +68,7 @@ class KnowledgeManager:
                 vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE),
             )
 
-    def add_user_memory(self, user_id: str, content: str, memory_type: str = "user_hypothesis", meta: Dict[str, Any] = None) -> bool:
+    def add_user_memory(self, user_id: str, content: str, memory_type: str = "user_hypothesis", category: str = "General", meta: Dict[str, Any] = None) -> bool:
         """
         L1/L2: Save private user memory or AI insight.
         """
@@ -84,6 +83,7 @@ class KnowledgeManager:
 
         payload = {
             "user_id": user_id,
+            "category": category,
             "type": memory_type,
             "visibility": "private",
             "content": content,

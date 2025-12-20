@@ -24,6 +24,6 @@
 
 # Output Format (JSON)
 {
-  "bot_message": "ユーザーへの返答...",
+  "bot_message": "ユーザーへの返答の全内容をここに記述してください。JSONの外には何も出力しないでください。",
   "suggested_next_mode": "discovery" | "innovation" | "research"
 }

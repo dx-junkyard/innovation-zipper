@@ -42,7 +42,14 @@ class SituationAnalyzer:
 
             # Save updated conversation summary if present
             if "conversation_summary" in analysis_result:
-                context["conversation_summary"] = analysis_result["conversation_summary"]
+                summary = analysis_result["conversation_summary"]
+                # Save to interest_profile.context for persistence
+                if "context" not in context["interest_profile"]:
+                    context["interest_profile"]["context"] = {}
+                context["interest_profile"]["context"]["conversation_summary"] = summary
+                
+                # Also keep in top level context if needed by workflow explicitly
+                context["conversation_summary"] = summary
 
         return context
 
@@ -56,7 +63,13 @@ class SituationAnalyzer:
         }
 
         state_dump = json.dumps(current_state, ensure_ascii=False, indent=2)
-        conversation_summary = context.get("conversation_summary", "")
+        
+        # Retrieve summary from interest_profile (primary persistence)
+        conversation_summary = context.get("interest_profile", {}).get("context", {}).get("conversation_summary", "")
+        # Fallback to top level if missing
+        if not conversation_summary:
+            conversation_summary = context.get("conversation_summary", "")
+            
         latest_user_message = context.get("user_message", "")
 
         # Capture page context

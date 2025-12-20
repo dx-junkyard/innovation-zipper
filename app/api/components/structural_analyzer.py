@@ -27,9 +27,12 @@ class StructuralAnalyzer:
 
     def _create_prompt(self, context: Dict[str, Any]) -> str:
         user_message = context.get("user_message", "")
+        conversation_summary = context.get("interest_profile", {}).get("conversation_summary", "")
+        
+        # Also include recent history for immediate context if needed, but instructions emphasize summary.
+        # "直近1〜2件のやり取りと、上記の「まとめ」のみを送信する構成"
         dialog_history = context.get("dialog_history", [])
+        recent_history = dialog_history[-2:] if dialog_history else []
+        recent_msgs_str = "\n".join([f"{msg.get('role')}: {msg.get('message')}" for msg in recent_history])
 
-        # 単純な履歴の結合
-        history_str = "\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in dialog_history])
-
-        return f"{self.base_prompt}\n\nContext:\nHistory:\n{history_str}\nUser Message:\n{user_message}"
+        return f"{self.base_prompt}\n\nContext:\nConversation Summary:\n{conversation_summary}\n\nRecent Messages:\n{recent_msgs_str}\n\nUser Message:\n{user_message}"

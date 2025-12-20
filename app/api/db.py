@@ -93,6 +93,43 @@ class DBClient:
             if cursor: cursor.close()
             if conn: conn.close()
 
+    def get_innovation_history(self, user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        イノベーションモード（構造分解など）が行われた分析ログを取得する。
+        """
+        conn = None
+        cursor = None
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor(dictionary=True)
+            # MySQL 5.7/8.0のJSON関数を使用してフィルタリング
+            query = """
+                SELECT id, created_at, analysis
+                FROM user_message_analyses
+                WHERE user_id = %s
+                  AND JSON_EXTRACT(analysis, '$.structural_analysis') IS NOT NULL
+                ORDER BY id DESC
+                LIMIT %s
+            """
+            cursor.execute(query, (user_id, limit))
+            rows = cursor.fetchall()
+
+            results = []
+            for row in rows:
+                analysis_data = json.loads(row["analysis"]) if isinstance(row["analysis"], str) else row["analysis"]
+                results.append({
+                    "id": row["id"],
+                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                    "data": analysis_data
+                })
+            return results
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error: {err}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
     def get_recent_conversation(self, user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
         conn = None
         cursor = None

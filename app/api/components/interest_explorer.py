@@ -29,9 +29,16 @@ class InterestExplorer:
         return result
 
     def _create_prompt(self, context: Dict[str, Any]) -> str:
+        conversation_summary = context.get("interest_profile", {}).get("conversation_summary", "")
+        # Fallback to recent messages if summary is empty, or just use what we have.
+        # But per instructions, we should perform the switch.
+        # We also need the current message? The user instructions said:
+        # "直近1〜2件のやり取りと、上記の「まとめ」のみを送信する構成"
+        
         history = context.get("dialog_history", [])
-        recent_history = history[-10:] if history else []
-        history_str = "\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in recent_history])
+        recent_history = history[-2:] if history else []
+        recent_msgs_str = "\n".join([f"{msg.get('role')}: {msg.get('message')}" for msg in recent_history])
+
         current_profile = json.dumps(context.get("interest_profile", {}), ensure_ascii=False, indent=2)
 
-        return f"{self.base_prompt}\n\nInterest Profile:\n{current_profile}\n\nRecent Conversation:\n{history_str}"
+        return f"{self.base_prompt}\n\nInterest Profile:\n{current_profile}\n\nConversation Summary:\n{conversation_summary}\n\nRecent Messages:\n{recent_msgs_str}"

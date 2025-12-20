@@ -193,6 +193,12 @@ async def post_usermessage(request: Request) -> str:
     repo.insert_message(user_id, "ai", bot_message)
     return bot_message
 
+@app.get("/api/v1/dashboard/innovations")
+async def get_innovation_history(user_id: str = Query(..., description="User ID"), limit: int = 10):
+    repo = DBClient()
+    history = repo.get_innovation_history(user_id, limit)
+    return {"history": history}
+
 from fastapi.responses import StreamingResponse
 
 @app.post("/api/v1/user-message-stream")

@@ -1,17 +1,20 @@
-FROM python:3.9
+# Dockerfile.ui の apt-get 部分に graphviz を追加
+FROM python:3.9-slim
+
 WORKDIR /app
 
-# Install system dependencies required for audio processing
+# Install system dependencies
+# Added graphviz for visualization
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get install -y --no-install-recommends ffmpeg graphviz \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.ui.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy requirements
+COPY requirements.ui.txt .
+RUN pip install --no-cache-dir -r requirements.ui.txt
 
-COPY . ./
+# Copy application code
+COPY app/ui/ ./app/ui/
 
-CMD ["streamlit", "run", "app/ui/ui.py", \
-     "--server.port", "5000", \
-     "--server.address", "0.0.0.0", \
-     "--server.headless", "true"]
+# Run Streamlit
+CMD ["streamlit", "run", "app/ui/ui.py", "--server.port", "8501", "--server.address", "0.0.0.0"]

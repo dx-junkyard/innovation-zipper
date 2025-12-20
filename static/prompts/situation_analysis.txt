@@ -20,10 +20,19 @@ AI: {last_ai_message}
 User: {latest_user_message}
 
 ## Instructions
-1. **Analyze Interest**: Identify the core topic the user is interested in. What are they trying to figure out?
-2. **Update Context**: Note the page they are looking at. Does it support or contradict their potential ideas?
-3. **Infer Intent**: Are they exploring, verifying a specific fact, or trying to debunk something?
-4. **Identify Hypotheses**: If the user states a belief or a question, frame it as a hypothesis to be verified.
+1. **Analyze Interface**: Identify the core topic the user is interested in.
+2. **Topic Consistency Check**:
+   - Compare the `latest_user_message` with the `conversation_summary`.
+   - if the topic has clearly changed (e.g. from coding to cooking), DISCARD the old summary and create a NEW one.
+   - If the topic is relevant or continuous, UPDATE the existing summary with new information.
+3. **Update Context**: Note the page they are looking at.
+4. **Infer Intent**: Are they exploring, verifying, or debunking?
+5. **Identify Hypotheses**: Frame beliefs/questions as hypotheses.
+
+## Output Guide for conversation_summary
+- If Topic Changed: "User switched topic to [New Topic]. key points: ..."
+- If Topic Continued: "[Previous Summary] + [New Incremental Info]"
+- Keep it concise.
 
 ## Output Format (JSON)
 Return a JSON object with the following structure:

@@ -17,7 +17,17 @@ class IntentRouter:
         user_message = context.get("user_message", "")
         captured_page = context.get("captured_page", {})
 
-        # 1. Report Check
+        # 1. ユーザーの明示的な拒否（「まだいい」「続けたい」等）がないかチェック
+        user_message = context.get("user_message", "")
+        if any(w in user_message for w in ["いいえ", "まだ", "続けて"]):
+            return "discovery"
+
+        # 2. 前回AIが提案したモードがステートにあれば、それを優先的に検討
+        suggested_mode = context.get("mode")
+        if suggested_mode in ["research", "innovation", "report"]:
+            return suggested_mode
+
+        # 3. Report Check
         if any(w in user_message for w in ["まとめて", "レポート", "議事録"]):
             return "report"
 

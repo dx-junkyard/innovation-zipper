@@ -37,12 +37,7 @@ class ChatUI:
             return ""
         return text.replace("\n", "  \n")
 
-    def run(self):
-        ensure_login()
-        st.set_page_config(page_title="AI チャットアプリ", page_icon="🤖")
-
-        ensure_login()
-
+    def render_chat(self):
         if "messages" not in st.session_state:
             st.session_state.messages = [
                 {"role": "assistant", "content": "こんにちは！何かお困りのことはありますか？"}
@@ -85,6 +80,19 @@ class ChatUI:
                 st.markdown(self._format_message(reply_text))
 
             st.session_state.messages.append({"role": "assistant", "content": reply_text})
+
+    def run(self):
+        st.set_page_config(page_title="AI チャットアプリ", page_icon="🤖")
+        ensure_login()
+
+        # ページ切り替えロジック
+        page = st.sidebar.radio("Menu", ["Chat", "Dashboard"])
+
+        if page == "Chat":
+            self.render_chat()
+        else:
+            from dashboard import show_dashboard
+            show_dashboard()
 
 
 def main():

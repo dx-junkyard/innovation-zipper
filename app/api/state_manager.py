@@ -4,9 +4,12 @@ from typing import Any, Dict, List, Optional
 class StateManager:
     DEFAULT_INTEREST_PROFILE: Dict[str, Any] = {
         "topics": [], # Topics of interest (e.g. "Tax Law", "Gardening")
+        "current_category": None, # Current session category (e.g. "Technology", "Business")
+        "categorized_interests": {}, # Dictionary of topics by category
         "context": {
             "current_page": None, # URL or title of the page they are looking at
             "browsing_history_summary": None,
+            "conversation_summary": "",
         },
         "intent": {
             "goal": None, # What they are trying to achieve
