@@ -47,6 +47,10 @@ class CaptureRequest(BaseModel):
     content: str
     screenshot_url: Optional[str] = None
 
+class TopicDeepDiveRequest(BaseModel):
+    user_id: str
+    topic: str
+
 
 @app.post("/api/v1/webhook/capture")
 async def capture_webhook(payload: CaptureRequest):
@@ -289,7 +293,8 @@ async def post_usermessage_stream(request: Request) -> StreamingResponse:
 
         yield json.dumps({
             "type": "result",
-            "message": bot_message
+            "message": bot_message,
+            "interest_profile": final_state.get("interest_profile")
         }, ensure_ascii=False) + "\n"
 
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")
@@ -301,6 +306,29 @@ async def get_user_messages(user_id: str = Query(..., description="ユーザーI
     return messages
 
 # 以下のエンドポイントを追加してください
+@app.post("/api/v1/topic-deep-dive")
+async def topic_deep_dive(request: TopicDeepDiveRequest):
+    ai_client = AIClient()
+    repo = DBClient()
+
+    # Get recent conversation for context
+    history = repo.get_recent_conversation(request.user_id)
+
+    dialog_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in history])
+
+    prompt = f"""これまでの会話を踏まえ、トピック『{request.topic}』についてこれまでの流れを簡潔にまとめ、ユーザーの知的好奇心を刺激するような鋭い質問を1つ提示してください。
+
+# 会話履歴:
+{dialog_text}
+
+JSON形式で {{'summary': '...', 'question': '...'}} と出力してください。"""
+
+    response = ai_client.generate_response(prompt)
+    if not response:
+        return {"summary": "情報の生成に失敗しました。", "question": "他に気になるトピックはありますか？"}
+
+    return response
+
 @app.post("/api/v1/auth/line")
 async def line_auth(request: LineAuthRequest):
     # 環境変数からシークレットを取得
