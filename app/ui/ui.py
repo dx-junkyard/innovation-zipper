@@ -70,6 +70,8 @@ class ChatUI:
                             status_placeholder.update(label=data["message"])
                         elif data["type"] == "result":
                             reply_text = data["message"]
+                            if "interest_profile" in data:
+                                st.session_state.current_profile = data["interest_profile"]
                             status_placeholder.update(label="完了しました！", state="complete", expanded=False)
                 except Exception as e:
                     import traceback
@@ -81,6 +83,31 @@ class ChatUI:
 
             st.session_state.messages.append({"role": "assistant", "content": reply_text})
 
+    def render_topic_deep_dive(self, topic: str):
+        """選択されたカテゴリーに関するまとめと問いかけを表示する"""
+        with st.expander(f"📌 {topic} についての深掘り", expanded=True):
+            with st.spinner("思考を整理しています..."):
+                api_url = self.API_URL.replace("/user-message-stream", "/topic-deep-dive")
+                payload = {
+                    "topic": topic,
+                    "user_id": st.session_state.get("user_id", "")
+                }
+
+                try:
+                    resp = requests.post(api_url, json=payload)
+                    resp.raise_for_status()
+                    data = resp.json()
+
+                    st.info(f"**これまでのまとめ**\n\n{data.get('summary', '（生成できませんでした）')}")
+                    st.success(f"**Next Question**\n\n{data.get('question', '（生成できませんでした）')}")
+
+                except Exception as e:
+                    st.error(f"エラーが発生しました: {e}")
+
+                if st.button("閉じる"):
+                    st.session_state.show_topic_info = False
+                    st.rerun()
+
     def run(self):
         st.set_page_config(page_title="AI チャットアプリ", page_icon="🤖")
         ensure_login()
@@ -88,7 +115,23 @@ class ChatUI:
         # ページ切り替えロジック
         page = st.sidebar.radio("Menu", ["Chat", "Dashboard"])
 
+        # サイドバー：関連カテゴリーボタンの表示
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("関連カテゴリー")
+
+        # 興味プロファイルから上位3つのトピックを取得
+        profile = st.session_state.get("current_profile", {})
+        topics = profile.get("topics", [])[:3]
+
+        for topic in topics:
+            if st.sidebar.button(f"🔍 {topic}", use_container_width=True):
+                st.session_state.selected_topic = topic
+                st.session_state.show_topic_info = True
+
         if page == "Chat":
+            # トピックが選択されている場合は、チャット欄の上部に「まとめと質問」を表示
+            if st.session_state.get("show_topic_info"):
+                self.render_topic_deep_dive(st.session_state.selected_topic)
             self.render_chat()
         else:
             from dashboard import show_dashboard
