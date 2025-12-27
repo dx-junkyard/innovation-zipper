@@ -25,9 +25,13 @@ class RAGManager:
         retrieval_evidence = {"results": []}
         user_id = context.get("user_id", "") # Expect user_id in context
 
+        # Extract current category from interest profile
+        interest_profile = context.get("interest_profile", {})
+        current_category = interest_profile.get("current_category")
+
         for hypothesis in hypotheses:
             if isinstance(hypothesis, dict) and hypothesis.get("should_call_rag"):
-                results = self._search_knowledge(hypothesis, user_id)
+                results = self._search_knowledge(hypothesis, user_id, category=current_category)
                 retrieval_evidence["results"].extend(results)
 
         context["retrieval_evidence"] = retrieval_evidence
@@ -37,9 +41,9 @@ class RAGManager:
         text = text.replace("\n", " ")
         return self.ai_client.get_embedding(text)
 
-    def _search_knowledge(self, hypothesis: Dict[str, Any], user_id: str) -> List[Dict[str, Any]]:
+    def _search_knowledge(self, hypothesis: Dict[str, Any], user_id: str, category: str = None) -> List[Dict[str, Any]]:
         """
-        仮説に基づいて知識を検索する（権限フィルタ付き）。
+        仮説に基づいて知識を検索する（権限フィルタ + カテゴリフィルタ付き）。
         """
         query_text = hypothesis.get("search_query") or hypothesis.get("statement")
 
@@ -49,9 +53,8 @@ class RAGManager:
         try:
             query_vector = self._get_embedding(query_text)
 
-            # Filter Logic: Public OR (Private AND current_user)
-            # Qdrant Filter: Should [ (Match public), (Match private AND Match user) ]
-            search_filter = Filter(
+            # Base Visibility Filter: Public OR (Private AND current_user)
+            visibility_filter = Filter(
                 should=[
                     FieldCondition(key="visibility", match=MatchValue(value="public")),
                     Filter(
@@ -62,6 +65,17 @@ class RAGManager:
                     )
                 ]
             )
+
+            # Apply Category Filter if present
+            if category:
+                search_filter = Filter(
+                    must=[
+                        visibility_filter,
+                        FieldCondition(key="category", match=MatchValue(value=category))
+                    ]
+                )
+            else:
+                search_filter = visibility_filter
 
             search_result = self.qdrant_client.query_points(
                 collection_name=self.collection_name,

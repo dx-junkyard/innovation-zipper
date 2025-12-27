@@ -28,6 +28,7 @@ User: {latest_user_message}
 3. **Update Context**: Note the page they are looking at.
 4. **Infer Intent**: Are they exploring, verifying, or debunking?
 5. **Identify Hypotheses**: Frame beliefs/questions as hypotheses.
+6. **Categorize**: Classify the current topic into a broad category (e.g., Technology, Business, Hobbies, Housework, etc.) and set it to `current_category`.
 
 ## Output Guide for conversation_summary
 - If Topic Changed: "User switched topic to [New Topic]. key points: ..."
@@ -39,6 +40,7 @@ Return a JSON object with the following structure:
 {{
   "interest_profile": {{
     "topics": ["topic1", "topic2"],
+    "current_category": "string",
     "context": {{
        "current_page": "{page_title}",
        "browsing_history_summary": "..."

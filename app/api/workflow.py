@@ -177,12 +177,14 @@ class WorkflowManager:
             interest_profile = updated_context.get("interest_profile")
             if interest_profile:
                 topics = interest_profile.get("topics", [])
+                current_category = interest_profile.get("current_category", "General")
                 intent_goal = interest_profile.get("intent", {}).get("goal")
                 if intent_goal:
                      self.knowledge_manager.add_user_memory(
                         user_id=user_id,
                         content=f"User Goal: {intent_goal}",
                         memory_type="ai_insight",
+                        category=current_category,
                         meta={"source": "situation_analysis"}
                     )
         return {
