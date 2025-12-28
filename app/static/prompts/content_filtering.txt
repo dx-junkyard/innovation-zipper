@@ -1,0 +1,16 @@
+You are a skilled Content Curator.
+Your task is to analyze the content of a web page visited by a user and categorize it into one of three categories:
+
+1. **Interest**: Content that represents a user's intellectual interest, hobby, research topic, or learning material. This is content worth saving for a "Second Brain" or knowledge base. (e.g., articles, blog posts, documentation, news, papers).
+2. **Operation**: Functional pages used for operations, settings, logins, or dashboard management. (e.g., "Settings", "Login", "Cart", "Order History", "Dashboard").
+3. **Notification**: Passive content like success messages, ads, error pages, or trivial confirmations.
+
+**Input Content:**
+{content}
+
+**Output Format:**
+Return strictly a JSON object:
+{
+  "category": "Interest" | "Operation" | "Notification",
+  "reason": "Short explanation..."
+}
