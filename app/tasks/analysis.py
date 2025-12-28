@@ -7,6 +7,7 @@ from app.api.workflow import WorkflowManager
 from app.api.ai_client import AIClient
 from app.api.db import DBClient
 from app.api.state_manager import StateManager
+from app.api.components.knowledge_manager import KnowledgeManager
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ def run_workflow_task(user_id: str, message: str, user_message_id: Optional[str]
         # 1. Initialize Clients
         ai_client = AIClient()
         repo = DBClient()
+        knowledge_manager = KnowledgeManager()
         workflow_manager = WorkflowManager(ai_client)
 
         # 2. Load context (History & State)
@@ -47,7 +49,44 @@ def run_workflow_task(user_id: str, message: str, user_message_id: Optional[str]
         bot_message = final_state.get("bot_message", "申し訳ありません、エラーが発生しました。")
 
         # 5. Save Results
-        # Save updated state
+
+        # --- Knowledge Graph Update Logic ---
+        try:
+            # Update User Interest (Current Category)
+            profile = final_state.get("interest_profile", {})
+            current_category = profile.get("current_category")
+
+            if current_category:
+                logger.info(f"Updating KG with category: {current_category}")
+                knowledge_manager.graph_manager.add_user_interest(
+                    user_id=user_id,
+                    concept_name=current_category,
+                    confidence=0.9,
+                    source_type="ai_inferred"
+                )
+
+            # Update Hypotheses
+            hypotheses_data = final_state.get("active_hypotheses", {})
+            # active_hypotheses might be a dict with a list 'hypotheses' or just the dict itself depending on structure
+            # Based on user snippet: hypotheses = final_state.get("active_hypotheses", {}).get("hypotheses", [])
+            hypotheses = hypotheses_data.get("hypotheses", []) if isinstance(hypotheses_data, dict) else []
+
+            if hypotheses:
+                logger.info(f"Updating KG with {len(hypotheses)} hypotheses")
+                for h in hypotheses:
+                    # h might be a dict or string
+                    h_text = h.get("text") if isinstance(h, dict) else str(h)
+
+                    if h_text:
+                        knowledge_manager.graph_manager.add_hypothesis(text=h_text)
+                        if current_category:
+                            knowledge_manager.graph_manager.link_hypothesis_to_concept(h_text, current_category)
+
+        except Exception as e:
+             logger.error(f"Failed to update Knowledge Graph: {e}")
+        # ------------------------------------
+
+        # Save updated state to MySQL
         repo.upsert_user_state(
             user_id,
             final_state["interest_profile"],
