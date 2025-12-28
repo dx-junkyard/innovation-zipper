@@ -18,6 +18,8 @@ class DBClient:
         }
 
     def create_user(self, line_user_id=None):
+        conn = None
+        cursor = None
         import uuid
         user_id = str(uuid.uuid4())
         try:
@@ -46,6 +48,8 @@ class DBClient:
         return user_id
 
     def insert_message(self, user_id, role, message):
+        conn = None
+        cursor = None
         try:
             conn = mysql.connector.connect(**self.config)
             cursor = conn.cursor()
@@ -193,6 +197,8 @@ class DBClient:
                 conn.close()
 
     def upsert_user_state(self, user_id: str, interest_profile: Dict[str, Any], active_hypotheses: Dict[str, Any]) -> None:
+        conn = None
+        cursor = None
         try:
             conn = mysql.connector.connect(**self.config)
             cursor = conn.cursor()
@@ -267,6 +273,8 @@ class DBClient:
                 conn.close()
 
     def record_analysis(self, user_id: str, user_message_id: int, analysis: Dict[str, Any]) -> None:
+        conn = None
+        cursor = None
         try:
             conn = mysql.connector.connect(**self.config)
             cursor = conn.cursor()
