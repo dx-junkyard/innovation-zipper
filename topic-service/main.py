@@ -65,7 +65,17 @@ class TopicModelManager:
                 self.model = BERTopic.load(MODEL_PATH)
                 logger.info("Loaded existing model.")
                 return
-            except: pass
+            except Exception as e:
+                logger.error(f"Load failed: {e}")
+
+        if not os.path.exists(SEED_DATA_PATH):
+            logger.info("Seed data not found. Generating default seed data...")
+            from seed_generator import generate_seed_data
+            try:
+                generate_seed_data(output_path=SEED_DATA_PATH)
+            except Exception as e:
+                logger.error(f"Failed to generate seed data: {e}")
+                return
 
         logger.info("Initializing with seed data...")
         if os.path.exists(SEED_DATA_PATH):
@@ -75,6 +85,7 @@ class TopicModelManager:
             self.model.fit_transform(docs)
             os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
             self.model.save(MODEL_PATH)
+            logger.info(f"Model trained on {len(docs)} seeds and saved.")
 
 manager = TopicModelManager()
 
