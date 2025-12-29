@@ -62,10 +62,19 @@ class ResponsePlanner:
         captured_page = context.get("captured_page", {}) or {}
         page_title = captured_page.get("title", "No page detected")
 
+        knowledge_gaps_str = json.dumps(context.get('knowledge_gaps', []), ensure_ascii=False, indent=2)
+
+        # Assuming the new prompt uses {user_goal} instead of {interest_profile} directly, or both.
+        # The new prompt uses: user_goal, active_hypotheses, retrieval_evidence, knowledge_gaps.
+        # Let's map these.
+
+        user_goal = context.get('interest_profile', {}).get('intent', {}).get('goal', 'Unknown Goal')
+
         return self.prompt_template.format(
-            interest_profile=interest_profile_str,
+            user_goal=user_goal,
+            page_title=page_title,
             active_hypotheses=active_hypotheses_str,
             hypotheses=hypotheses_str,
-            page_title=page_title,
-            retrieval_evidence=retrieval_evidence_str
+            retrieval_evidence=retrieval_evidence_str,
+            knowledge_gaps=knowledge_gaps_str
         )

@@ -6,6 +6,7 @@ import json
 from app.api.components.situation_analyzer import SituationAnalyzer
 from app.api.components.hypothesis_generator import HypothesisGenerator
 from app.api.components.rag_manager import RAGManager
+from app.api.components.gap_analyzer import GapAnalyzer
 from app.api.components.response_planner import ResponsePlanner
 from app.api.components.knowledge_manager import KnowledgeManager
 from app.api.ai_client import AIClient
@@ -47,6 +48,7 @@ class GraphState(TypedDict):
     active_hypotheses: Dict[str, Any]
     hypotheses: Optional[List[Dict[str, Any]]]
     retrieval_evidence: Optional[Dict[str, Any]]
+    knowledge_gaps: Optional[List[Dict[str, Any]]]
     response_plan: Optional[Dict[str, Any]]
     bot_message: Optional[str]
     captured_page: Optional[Dict[str, Any]]
@@ -65,6 +67,7 @@ class WorkflowManager:
         self.situation_analyzer = SituationAnalyzer(ai_client)
         self.hypothesis_generator = HypothesisGenerator(ai_client)
         self.rag_manager = RAGManager(ai_client)
+        self.gap_analyzer = GapAnalyzer(ai_client)
         self.response_planner = ResponsePlanner(ai_client)
         self.knowledge_manager = KnowledgeManager()
 
@@ -90,6 +93,7 @@ class WorkflowManager:
         workflow.add_node("situation_analysis", self._situation_analysis_node)
         workflow.add_node("hypothesis_generation", self._hypothesis_generation_node)
         workflow.add_node("rag_retrieval", self._rag_retrieval_node)
+        workflow.add_node("gap_analysis", self._gap_analysis_node)
         workflow.add_node("response_planning", self._response_planning_node)
 
         # ノードの定義 (Innovation)
@@ -125,7 +129,8 @@ class WorkflowManager:
                 "skip": "response_planning"
             }
         )
-        workflow.add_edge("rag_retrieval", "response_planning")
+        workflow.add_edge("rag_retrieval", "gap_analysis")
+        workflow.add_edge("gap_analysis", "response_planning")
         workflow.add_edge("response_planning", END)
 
         # --- Innovation Flow ---
@@ -205,6 +210,13 @@ class WorkflowManager:
         updated_context = self.rag_manager.retrieve_knowledge(state.copy())
         return {
             "retrieval_evidence": updated_context.get("retrieval_evidence")
+        }
+
+    def _gap_analysis_node(self, state: GraphState) -> Dict[str, Any]:
+        """ギャップ分析ノード"""
+        updated_context = self.gap_analyzer.analyze(state.copy())
+        return {
+            "knowledge_gaps": updated_context.get("knowledge_gaps")
         }
 
     def _response_planning_node(self, state: GraphState) -> Dict[str, Any]:

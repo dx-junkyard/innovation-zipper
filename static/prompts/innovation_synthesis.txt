@@ -12,8 +12,21 @@
     {
       "title": "キャッチーなタイトル",
       "logic": "組み合わせた論理 (例: [Agent亜種] x [Mechanism亜種])",
-      "insight": "そこから得られる解決策の糸口"
+      "insight": "そこから得られる解決策の糸口",
+      "validation_protocol": {
+          "hypothesis_statement": "Specific statement to verify",
+          "data_collection": "Logs, metrics, or qualitative data to collect",
+          "kpi": "Success/Failure criteria",
+          "sop": "Standard Operating Procedure (Step-by-step action plan)"
+      }
     }
   ],
   "bot_message": "ユーザーへのプレゼンテーション（Markdown形式）。選定したTop5の仮説について、構造・メカニズム・示唆を魅力的に解説してください。"
 }
+
+3. **Generate Validation Protocols**: For each proposed innovation hypothesis, draft a validation protocol:
+   - **Hypothesis**: Specific statement to verify.
+   - **Data**: Logs, metrics, or qualitative data to collect.
+   - **KPI**: Success/Failure criteria.
+   - **SOP**: Standard Operating Procedure (Step-by-step action plan).
+4. **Draft Response**: Explain the hypotheses clearly to the user, including the validation protocols.
