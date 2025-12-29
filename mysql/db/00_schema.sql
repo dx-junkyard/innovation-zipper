@@ -14,3 +14,5 @@ CREATE TABLE IF NOT EXISTS user_states (
     PRIMARY KEY (user_id),
     CONSTRAINT fk_user_states_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+

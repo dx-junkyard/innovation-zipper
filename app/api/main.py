@@ -12,6 +12,7 @@ load_dotenv()
 
 from app.api.ai_client import AIClient
 from app.api.db import DBClient
+from app.api.workflow import WorkflowManager
 from app.api.state_manager import StateManager
 from app.api.components.knowledge_manager import KnowledgeManager
 from app.tasks.analysis import run_workflow_task, process_capture_task, process_document_task
