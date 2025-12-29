@@ -45,6 +45,7 @@ class DBClient:
                 cursor.close()
             if conn:
                 conn.close()
+        return user_id
 
     def insert_user_file(self, user_id: str, file_name: str, file_path: str, title: str) -> bool:
         """
@@ -67,7 +68,6 @@ class DBClient:
                 cursor.close()
             if conn:
                 conn.close()
-        return user_id
 
     def insert_message(self, user_id, role, message):
         conn = None
