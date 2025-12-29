@@ -3,6 +3,8 @@ import asyncio
 import json
 import os
 import redis
+import pypdf
+import uuid
 from typing import Dict, Any, Optional
 
 from app.core.celery_app import celery_app
@@ -122,6 +124,67 @@ def run_workflow_task(user_id: str, message: str, user_message_id: Optional[str]
         logger.error(f"Error in workflow task for user_id={user_id}: {e}", exc_info=True)
         return {"status": "error", "error": str(e)}
 
+
+@celery_app.task(name="process_document_task")
+def process_document_task(user_id: str, file_path: str, title: str, file_id: str):
+    """
+    Background task to process uploaded documents (PDF).
+    Extracts text, chunks it, and saves it to KnowledgeManager with metadata.
+    """
+    try:
+        print(f"Starting process_document_task for {file_path}")
+        km = KnowledgeManager()
+
+        if not os.path.exists(file_path):
+            print(f"File not found: {file_path}")
+            return {"status": "error", "message": "File not found"}
+
+        text_content = ""
+        try:
+            reader = pypdf.PdfReader(file_path)
+            for page in reader.pages:
+                text_content += page.extract_text() + "\n"
+        except Exception as e:
+            print(f"Error reading PDF: {e}")
+            return {"status": "error", "message": f"PDF reading failed: {str(e)}"}
+
+        if not text_content.strip():
+             return {"status": "error", "message": "No text content extracted"}
+
+        # Simple Chunking (can be improved with LangChain RecursiveCharacterTextSplitter later)
+        chunk_size = 1000
+        overlap = 100
+        chunks = []
+        for i in range(0, len(text_content), chunk_size - overlap):
+            chunks.append(text_content[i:i + chunk_size])
+
+        success_count = 0
+        for i, chunk in enumerate(chunks):
+            # Add to Knowledge Base with Metadata
+            meta = {
+                "file_id": file_id,
+                "title": title,
+                "chunk_index": i,
+                "source": "uploaded_file"
+            }
+
+            # Using 'user_stated' or 'user_hypothesis' type?
+            # Files are usually "external info" but for RAG purposes we treat them as private memory for now.
+            if km.add_user_memory(
+                user_id=user_id,
+                content=chunk,
+                memory_type="document_chunk",
+                category="General", # Or infer category later
+                meta=meta
+            ):
+                success_count += 1
+
+        print(f"Processed {success_count} chunks for {title}")
+        return {"status": "completed", "chunks_processed": success_count}
+
+    except Exception as e:
+        print(f"Task failed: {e}")
+        return {"status": "failed", "error": str(e)}
 
 @celery_app.task(name="process_capture_task")
 def process_capture_task(payload: Dict[str, Any]):

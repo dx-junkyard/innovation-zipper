@@ -119,8 +119,14 @@ class KnowledgeManager:
 
                 # If memory is a hypothesis, add it
                 if memory_type == "user_hypothesis":
-                    self.graph_manager.add_hypothesis(text=content, evidence_ids=[entry_id])
+                    self.graph_manager.add_hypothesis(text=content, evidence_ids=[entry_id], properties=meta)
                     self.graph_manager.link_hypothesis_to_concept(content, category)
+
+                # If memory is a document chunk, also add it as hypothesis node for now to ensure visibility in graph
+                elif memory_type == "document_chunk":
+                    # We treat document chunks as hypotheses/claims from a file source
+                    self.graph_manager.add_hypothesis(text=content, evidence_ids=[entry_id], properties=meta)
+                    # Optionally link to a "Document" concept or similar if needed, but for now just presence is key
 
             return True
         except Exception as e:

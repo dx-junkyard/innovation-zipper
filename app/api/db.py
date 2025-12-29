@@ -47,6 +47,28 @@ class DBClient:
                 conn.close()
         return user_id
 
+    def insert_user_file(self, user_id: str, file_name: str, file_path: str, title: str) -> bool:
+        """
+        Inserts a record for an uploaded user file.
+        """
+        conn = None
+        cursor = None
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor()
+            query = "INSERT INTO user_files (user_id, file_name, file_path, title) VALUES (%s, %s, %s, %s)"
+            cursor.execute(query, (user_id, file_name, file_path, title))
+            conn.commit()
+            return True
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error: {err}")
+            return False
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
     def insert_message(self, user_id, role, message):
         conn = None
         cursor = None

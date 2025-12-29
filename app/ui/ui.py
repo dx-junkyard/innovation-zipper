@@ -128,6 +128,26 @@ class ChatUI:
                 st.session_state.selected_topic = topic
                 st.session_state.show_topic_info = True
 
+        # --- File Upload Section ---
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("📂 資料アップロード")
+        uploaded_file = st.sidebar.file_uploader("PDFファイル", type=["pdf"])
+        if uploaded_file is not None:
+            file_title = st.sidebar.text_input("タイトル", value=uploaded_file.name)
+            if st.sidebar.button("アップロード"):
+                with st.spinner("アップロード中..."):
+                    files = {"file": (uploaded_file.name, uploaded_file, "application/pdf")}
+                    data = {"user_id": st.session_state.get("user_id"), "title": file_title}
+                    upload_url = self.API_URL.replace("/user-message-stream", "/user-files/upload")
+                    try:
+                        resp = requests.post(upload_url, data=data, files=files)
+                        if resp.status_code == 200:
+                            st.sidebar.success("アップロード完了！")
+                        else:
+                            st.sidebar.error(f"エラー: {resp.text}")
+                    except Exception as e:
+                        st.sidebar.error(f"通信エラー: {e}")
+
         if page == "Chat":
             # トピックが選択されている場合は、チャット欄の上部に「まとめと質問」を表示
             if st.session_state.get("show_topic_info"):

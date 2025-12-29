@@ -91,17 +91,18 @@ class GraphManager:
         except Exception as e:
             print(f"Error adding interest edge: {e}")
 
-    def add_hypothesis(self, text: str, evidence_ids: List[str] = None):
+    def add_hypothesis(self, text: str, evidence_ids: List[str] = None, properties: Dict[str, Any] = None):
         """Adds a Hypothesis node."""
         if not self.driver: return
         query = f"""
         MERGE (h:{self.LABEL_HYPOTHESIS} {{text: $text}})
         SET h.evidence = $evidence
+        SET h += $props
         RETURN h
         """
         try:
             with self.driver.session() as session:
-                session.run(query, text=text, evidence=evidence_ids or [])
+                session.run(query, text=text, evidence=evidence_ids or [], props=properties or {})
         except Exception as e:
             print(f"Error adding hypothesis: {e}")
 

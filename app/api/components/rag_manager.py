@@ -88,13 +88,20 @@ class RAGManager:
             for hit in search_result.points:
                 payload = hit.payload
                 source_type = "public_fact" if payload.get("visibility") == "public" else "private_memory"
+                meta = payload.get("meta") or {}
+
+                # Ensure title and file_id are explicitly available in results structure for easy access
+                title = meta.get("title")
+                file_id = meta.get("file_id")
 
                 results.append({
                     "hypothesis_id": hypothesis.get("id"),
                     "source_type": source_type,
                     "type": payload.get("type"),
                     "content": payload.get("content"),
-                    "meta": payload.get("meta"),
+                    "meta": meta,
+                    "title": title,
+                    "file_id": file_id,
                     "score": hit.score
                 })
             return results

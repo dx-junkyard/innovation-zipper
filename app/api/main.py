@@ -12,11 +12,15 @@ load_dotenv()
 
 from app.api.ai_client import AIClient
 from app.api.db import DBClient
+from app.api.workflow import WorkflowManager
 from app.api.state_manager import StateManager
 from app.api.components.knowledge_manager import KnowledgeManager
-from app.tasks.analysis import run_workflow_task, process_capture_task
+from app.tasks.analysis import run_workflow_task, process_capture_task, process_document_task
 from pydantic import BaseModel, Field, HttpUrl
 import requests
+import aiofiles
+import uuid
+from fastapi import UploadFile, File, Form
 
 app = FastAPI()
 
@@ -317,6 +321,57 @@ async def line_auth(request: LineAuthRequest):
     
     return {"user_id": user_id, "line_user_id": line_user_id}
 
+
+@app.post("/api/v1/user-files/upload")
+async def upload_user_file(
+    user_id: str = Form(...),
+    title: str = Form(...),
+    file: UploadFile = File(...)
+):
+    """
+    Handles PDF file upload, saves it, records in DB, and triggers background processing.
+    """
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+
+    # Generate unique ID for the file
+    file_id = str(uuid.uuid4())
+
+    # Define storage path (ensure app/uploads exists)
+    upload_dir = "/app/uploads"
+    os.makedirs(upload_dir, exist_ok=True)
+
+    # Create safe filename
+    file_ext = os.path.splitext(file.filename)[1]
+    safe_filename = f"{file_id}{file_ext}"
+    file_path = os.path.join(upload_dir, safe_filename)
+
+    # Save file to disk
+    try:
+        async with aiofiles.open(file_path, 'wb') as out_file:
+            content = await file.read()
+            await out_file.write(content)
+    except Exception as e:
+        logger.error(f"File save failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save file.")
+
+    # Insert into MySQL
+    repo = DBClient()
+    if not repo.insert_user_file(user_id, file.filename, file_path, title):
+        # Cleanup file if DB fails
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        raise HTTPException(status_code=500, detail="Database insertion failed.")
+
+    # Trigger Background Task
+    task = process_document_task.delay(user_id, file_path, title, file_id)
+
+    return {
+        "status": "uploaded",
+        "file_id": file_id,
+        "task_id": str(task.id),
+        "message": "File uploaded and processing started."
+    }
 
 
 if __name__ == "__main__":

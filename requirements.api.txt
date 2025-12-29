@@ -9,7 +9,8 @@ langgraph
 langchain-core
 qdrant-client
 python-multipart
-
 celery
 redis
 neo4j
+pypdf
+aiofiles

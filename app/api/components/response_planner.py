@@ -46,13 +46,16 @@ class ResponsePlanner:
         active_hypotheses_str = json.dumps(context.get('active_hypotheses', {}), ensure_ascii=False, indent=2)
         hypotheses_str = json.dumps(context.get('hypotheses', []), ensure_ascii=False, indent=2)
 
-        # Format retrieval evidence with tags [MEMORY] / [FACT]
+        # Format retrieval evidence with tags [MEMORY] / [FACT] and citation
         retrieval_evidence = context.get('retrieval_evidence', {}).get('results', [])
         formatted_evidence = []
         for item in retrieval_evidence:
             source_tag = "[FACT]" if item.get("source_type") == "public_fact" else "[MEMORY]"
+            title = item.get("title")
             content = item.get("content", "")[:300] # Truncate for prompt
-            formatted_evidence.append(f"{source_tag} {content}")
+
+            citation = f" (Source: {title})" if title else ""
+            formatted_evidence.append(f"{source_tag}{citation} {content}")
 
         retrieval_evidence_str = "\n".join(formatted_evidence)
 
