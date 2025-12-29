@@ -1,143 +1,121 @@
-# AI Agent Development Playground (Multimodal Agent)
+# Second Brain AI Agent
 
-このプロジェクトは、ユーザーとの対話を通じて「没入感（Immersion）」と「真実への接近（Truth）」のスイートスポットを探り、最適な思考モードへ誘導するマルチモーダルAIエージェントです。
+## 1. プロジェクト概要 (Introduction)
 
-## コンセプト: Second Brain Architecture
+### コンセプト
+本プロジェクトは、ユーザーの興味・関心を拡張し、思考の質を高めるための「第2の脳（Second Brain）」として機能する自律型AIエージェントシステムです。単なる検索エンジンやQ&Aボットとは異なり、ユーザーの思考パートナーとして「探索(Discovery)」「調査(Research)」「発想(Innovation)」の3つのモードを適応的に切り替えながら、深い洞察と新しいアイデアの創出を支援します。
 
-本システムは、ユーザーの思考拡張を支援する「第2の脳」として機能するため、3層のデータ構造を持っています。
+### 解決する課題
+現代のナレッジワーカーが直面する以下の課題を解決します：
+*   **情報過多による思考の浅薄化:** 膨大な情報を整理・構造化し、本質的な「知識」へと昇華させます。
+*   **ネット情報の不確実性:** 情報源の信頼性を検証し、事実（Fact）と推論（Inference）を明確に区別します。
+*   **アイデアの枯渇:** 既存の知識を構造的に分解・再結合することで、予期せぬイノベーションの種を提供します。
 
-1.  **L1: User Context (Private)**
-    *   ユーザー個人の興味、行動履歴、対話ログを蓄積します。
-    *   他者には共有されないプライベートな領域です。
-2.  **L2: AI Insight (Private)**
-    *   L1のデータをAIが分析・構造化したインサイト（興味プロファイル、仮説など）を保持します。
-    *   構造分解や仮説生成の基盤となります。
-3.  **L3: Shared Knowledge (Public)**
-    *   Webから収集した一般知識や、検証済みの事実を格納します。
-    *   RAG（検索拡張生成）の参照元として機能します。
+---
 
-## モード構成
+## 2. システム構成 (Architecture Stack)
 
-1.  **Discovery Mode (Default)**:
-    -   **探索**: ユーザーとの雑談を通じて、個人的な熱量（Immersion）と構造的な課題（Truth）が交差するテーマを探ります。
-    -   **誘導**: 機運が高まった段階で、解決（Innovation）や調査（Research）への移行を提案します。
-    -   **Deep Dive**: 過去の会話全体から要約と鋭い問いかけを行い、思考を深めます。
+本システムは、モダンなマイクロサービスアーキテクチャを採用しており、スケーラビリティと保守性を重視しています。
 
-2.  **Innovation Mode**:
-    -   **構造分解・発想**: 課題をシステム思考で分解し、強制発想によりイノベーティブな仮説を生成します。
-    -   **可視化（Innovation Zipper）**: ダッシュボードにて、構造分解から仮説生成までのプロセスを「ジッパー構造」として可視化します。
+### Application Layer
+*   **Frontend:** Streamlit
+    *   ユーザーとのチャットインターフェースおよび管理ダッシュボード（「Innovation Zipper」可視化など）を提供。
+*   **Backend:** FastAPI
+    *   REST APIおよびWebSocketによる通信、Chrome拡張機能からのデータ受信エンドポイントを提供。
+*   **Agent Workflow:** LangGraph
+    *   ステートフルなエージェントの思考プロセスと分岐（Intent Routing）を制御。
+*   **Asynchronous Processing:** Celery + Redis
+    *   ドキュメント解析、Webページ取り込み、重い推論処理をバックグラウンドで非同期実行。
 
-3.  **Research Mode**:
-    -   **調査・検証**: Webページ情報やRAGを用いて、仮説の事実確認を行います。
-    -   **Chrome連携**: ブラウザで閲覧中のページを即座に取り込み、議論のコンテキストとして利用します。
+### Data Persistence Layer (The "Brain")
+*   **MySQL:**
+    *   ユーザー管理、会話ログ、構造化データ（JSONカラムを使用した分析結果など）の保存。
+*   **Qdrant (Vector DB):**
+    *   RAG（Retrieval-Augmented Generation）の中核。アップロードされたPDFやWeb記事をチャンク化し、ベクトル検索を可能にします。
+*   **Neo4j (Knowledge Graph):**
+    *   「概念(Concept)」と「仮説(Hypothesis)」をノードとして管理。知識間の関係性（Edges）を可視化し、構造的な洞察を支援します。
 
-4.  **Report Mode**:
-    -   **統合**: 議論の成果をレポートとして出力します。
+---
 
-## アーキテクチャ
+## 3. 実装機能と特徴 (Key Features)
 
-システムは `IntentRouter` を入口とし、LangGraphを用いて柔軟なワークフロー制御を行います。また、ナレッジグラフとベクトル検索を併用することで、文脈理解と高精度な検索を両立しています。
+### マルチモーダル入力
+*   **Chrome Extension Integration:** ブラウザで見ているページをワンクリックで取り込み、`SituationAnalyzer`が即座にコンテキストとして理解・記憶します。
+*   **PDF Upload Pipeline:** 論文や技術資料をアップロードすると、自動的にテキスト抽出・チャンク化され、引用可能な「知識」として統合されます。
 
-### テックスタック
+### 適応型思考ワークフロー (Adaptive Workflow)
+LangGraphにより、ユーザーの意図や文脈に応じて最適な思考モードが選択されます。
 
-*   **API Framework**: FastAPI
-*   **Workflow Engine**: LangGraph
-*   **Asynchronous Task**: Celery + Redis
-*   **Databases**:
-    *   **MySQL**: ユーザー情報、会話ログ、解析履歴
-    *   **Neo4j (Graph DB)**: 知識の構造化、概念間の関係性の管理
-    *   **Qdrant (Vector DB)**: 文書のベクトル検索、意味的類似性の判定
-*   **Frontend**: Streamlit
-*   **LLM**: OpenAI GPT-4o / GPT-3.5
+1.  **Discovery Mode (探索):**
+    *   ユーザーの潜在的な興味を深掘りする壁打ちパートナー。曖昧な問いに対して多角的な視点を提供します。
+2.  **Research Mode (調査):**
+    *   **仮説生成:** ユーザーの問いに対して初期仮説を立案。
+    *   **RAG検索:** ベクトルDBから証拠となる情報を検索。
+    *   **Gap分析:** 検索結果を「検証済」「推論」「要現場検証(Field-Required)」に分類し、情報の欠落を特定。
+    *   **調査アクション提案:** 不足情報を補うための具体的なアクション（追加リサーチ、実地調査など）を提案。
+3.  **Innovation Mode (発想):**
+    *   **Structural Analysis:** 対象の概念を要素分解（構造化）。
+    *   **Forced Association:** 異質な概念との強制結合やバリアント生成を行い、新しいアイデア（Innovation Hypotheses）を創出します。
 
-### 処理フロー
+### 意思決定支援
+*   **ROIに基づいたアクション提案:** 情報の価値（Value of Information）と取得コストを天秤にかけ、最適な次のアクションを提案します。
+*   **検証プロトコル生成:** アイデアの実効性を確かめるための具体的な検証手順（KPI、SOP）を自動生成します。
 
-1.  **Intent Routing**:
-    -   ユーザー発話やコンテキストに基づいて、適切なモード（Discovery, Innovation, Research, Report）に自動的に振り分けます。
-2.  **Workflows**:
-    -   **Discovery**: `InterestExplorer` がユーザーの関心を深掘りします。
-    -   **Innovation**: `StructuralAnalyzer` → `VariantGenerator` → `InnovationSynthesizer` の順で仮説を構築します。
-    -   **Research**: Webhook経由または検索により情報を収集し、検証します。
-    -   **Report**: 議論をまとめます。
+---
 
-## プロジェクト構成
+## 4. データ処理フロー (Data Flow)
 
-```
-.
-├── app/
-│   ├── api/                    # FastAPI バックエンド
-│   │   ├── main.py             # メインAPIエンドポイント (LINE Auth含む)
-│   │   ├── admin.py            # 管理用API (データインポート/リセット)
-│   │   ├── workflow.py         # LangGraph ワークフロー定義
-│   │   ├── components/         # エージェントコンポーネント (各モードのロジック)
-│   │   └── state_manager.py    # 会話状態管理
-│   ├── core/                   # Celery設定など
-│   ├── tasks/                  # 非同期タスク定義
-│   └── ui/                     # Streamlit フロントエンド
-├── static/prompts/             # LLM プロンプトテンプレート
-├── docker-compose.yaml         # インフラ構成 (API, UI, DBs, Worker)
-└── .env.example                # 環境変数サンプル
-```
+### A. Web Capture (Chrome Ext)
+1.  **Capture Request:** Chrome拡張機能からWebページのURL/Title/Contentが送信される。
+2.  **API & Parsing:** FastAPIが受け取り、HTML解析と要約生成を実行。
+3.  **Storage:** コンテンツを保存し、ベクトル化してQdrantへ格納。
+4.  **Situation Analysis:** `SituationAnalyzer`がユーザーの興味プロファイル（Interest Profile）を更新し、コンテキストを最新化。
 
-## API エンドポイント
+### B. File Upload (PDF)
+1.  **User Upload:** UIからPDFをアップロード。
+2.  **Processing:** `pypdf`によるテキスト抽出とチャンク化。
+3.  **Knowledge Integration:** `KnowledgeManager`がチャンクをベクトル化(Qdrant)し、同時にメタデータをNeo4j上のノードとしてリンクさせる。これによりRAGでの正確な引用が可能になる。
 
-### 認証・ユーザー管理
+### C. Chat Interaction
+1.  **User Message:** ユーザーがメッセージを送信。
+2.  **Intent Router:** 文脈とキーワードに基づき、モード（Discovery/Research/Innovation/Report）を判定。
+3.  **LangGraph Workflow:**
+    *   *Researchの場合:* 状況分析 → 仮説生成 → RAG → Gap分析 → 応答生成
+    *   *Innovationの場合:* 構造分析 → バリアント生成 → 統合(Synthesis)
+4.  **Response:** 最終的な回答と、思考プロセス（中間生成物）をStreamlitに表示。
 
-- **POST `/api/v1/auth/line`**: LINE Login認証（Chrome拡張機能連携用）
-- **POST `/api/v1/users`**: ユーザー作成
+---
 
-### Webhook API (Chrome Extension 連携用)
+## 5. セットアップと使用方法 (Getting Started)
 
-- **POST `/api/v1/webhook/capture`**:
-    - 閲覧中のWebページ情報を非同期で取り込み、Research Modeのコンテキストとして利用します。
-    - Fire-and-Forget方式（Celery Task）で処理されます。
+### Prerequisites
+*   Docker & Docker Compose
+*   OpenAI API Key
 
-### チャット・分析 API
+### Installation
 
-- **POST `/api/v1/user-message`**: メッセージ送信（非同期分析開始）
-- **POST `/api/v1/user-message-stream`**: ストリーミング応答（LangGraphの実行状況をリアルタイム返却）
-- **POST `/api/v1/topic-deep-dive`**: 会話履歴に基づく深掘り質問の生成
-- **GET `/api/v1/dashboard/innovations`**: イノベーション履歴取得
-
-### 管理用 API (Port 8087)
-
-- **POST `/api/v1/service-catalog/import`**: 知識データのインポート
-- **DELETE `/api/v1/service-catalog/reset`**: ナレッジベースのリセット
-
-## イノベーション・ジッパ (Innovation Zipper)
-
-Innovation Modeで生成された思考プロセスを可視化する機能です。
-UIのサイドバーから「Dashboard」を選択することでアクセスできます。
-
-- **構造 (Structural Analysis - Blue)**: 現状の課題構造（主体、痛点、制約、悪循環）。
-- **飛躍 (Variants - Green)**: 制約や主体に対する強制的な発想（亜種）。
-- **再結合 (Synthesis - Red)**: 亜種を組み合わせて導き出された新しい仮説（ジッパーが閉じる）。
-
-## セットアップ
-
-### 前提条件
-
-- Docker / Docker Compose
-- OpenAI API Key
-- (Optional) LINE Channel ID/Secret (LINEログインを使用する場合)
-
-### 手順
-
-1.  **リポジトリのクローン**
-2.  **環境変数の設定**: `.env.example` を `.env` にコピーし、以下を設定してください。
-    - `OPENAI_API_KEY`: 必須
-    - `LINE_CHANNEL_ID`, `LINE_CHANNEL_SECRET`: LINE連携をする場合
-3.  **起動**:
+1.  リポジトリをクローンします。
+2.  `.env` ファイルを作成し、必要な環境変数を設定します。
     ```bash
-    docker compose up --build
+    cp .env.example .env
+    # .env内のOPENAI_API_KEY等を編集してください
     ```
-4.  **アクセス**:
-    - **UI (Streamlit)**: http://localhost:8080
-    - **Main API**: http://localhost:8086
-    - **Admin API**: http://localhost:8087
-    - **Neo4j Browser**: http://localhost:7474 (User: neo4j / Pass: password)
-    - **Qdrant**: http://localhost:6333
 
-## ライセンス
+### Run
 
-[MIT ライセンス](LICENSE)
+Docker Composeを使用してシステム全体を起動します。
+
+```bash
+docker compose up --build
+```
+
+### Access
+
+起動後、以下のURLで各サービスにアクセスできます。
+
+*   **User Interface (Streamlit):** `http://localhost:8080`
+    *   メインのチャット画面およびダッシュボードです。
+*   **API Documentation (Swagger UI):** `http://localhost:8086/docs`
+    *   バックエンドAPIの仕様確認とテストが可能です。
+*   **Neo4j Browser:** `http://localhost:7474`
+    *   ナレッジグラフの可視化とクエリ実行が可能です。
