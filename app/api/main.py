@@ -6,6 +6,7 @@ import logging
 import os
 from dotenv import load_dotenv
 import redis
+import hashlib
 
 # .env ファイルを読み込む
 load_dotenv()
@@ -326,6 +327,7 @@ async def line_auth(request: LineAuthRequest):
 async def upload_user_file(
     user_id: str = Form(...),
     title: str = Form(...),
+    is_public: bool = Form(False),
     file: UploadFile = File(...)
 ):
     """
@@ -333,6 +335,15 @@ async def upload_user_file(
     """
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+
+    # Check for duplicates using hash
+    repo = DBClient()
+    content = await file.read()
+    file_hash = hashlib.sha256(content).hexdigest()
+
+    # Check if duplicate exists
+    if repo.check_file_exists(user_id, file_hash):
+        raise HTTPException(status_code=400, detail="このファイルは既に登録されています。")
 
     # Generate unique ID for the file
     file_id = str(uuid.uuid4())
@@ -348,16 +359,16 @@ async def upload_user_file(
 
     # Save file to disk
     try:
+        # Since we already read the content, we can just write it.
+        # But aiofiles expects async write.
         async with aiofiles.open(file_path, 'wb') as out_file:
-            content = await file.read()
             await out_file.write(content)
     except Exception as e:
         logger.error(f"File save failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to save file.")
 
     # Insert into MySQL
-    repo = DBClient()
-    if not repo.insert_user_file(user_id, file.filename, file_path, title):
+    if not repo.insert_user_file(user_id, file.filename, file_path, title, file_hash, is_public):
         # Cleanup file if DB fails
         if os.path.exists(file_path):
             os.remove(file_path)

@@ -134,15 +134,24 @@ class ChatUI:
         uploaded_file = st.sidebar.file_uploader("PDFファイル", type=["pdf"])
         if uploaded_file is not None:
             file_title = st.sidebar.text_input("タイトル", value=uploaded_file.name)
+            is_public = st.sidebar.checkbox("このファイルを他のユーザーにも公開する", value=False)
             if st.sidebar.button("アップロード"):
                 with st.spinner("アップロード中..."):
                     files = {"file": (uploaded_file.name, uploaded_file, "application/pdf")}
-                    data = {"user_id": st.session_state.get("user_id"), "title": file_title}
+                    data = {
+                        "user_id": st.session_state.get("user_id"),
+                        "title": file_title,
+                        "is_public": is_public
+                    }
                     upload_url = self.API_URL.replace("/user-message-stream", "/user-files/upload")
                     try:
                         resp = requests.post(upload_url, data=data, files=files)
                         if resp.status_code == 200:
                             st.sidebar.success("アップロード完了！")
+                        elif resp.status_code == 400:
+                             # Display the specific error message from the API (likely duplication)
+                             detail = resp.json().get("detail", resp.text)
+                             st.sidebar.error(f"エラー: {detail}")
                         else:
                             st.sidebar.error(f"エラー: {resp.text}")
                     except Exception as e:

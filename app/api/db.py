@@ -47,7 +47,31 @@ class DBClient:
                 conn.close()
         return user_id
 
-    def insert_user_file(self, user_id: str, file_name: str, file_path: str, title: str) -> bool:
+    def check_file_exists(self, user_id: str, file_hash: str) -> bool:
+        """
+        Check if the file already exists for the user or is public.
+        """
+        conn = None
+        cursor = None
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor()
+            query = """
+                SELECT id FROM user_files
+                WHERE (user_id = %s AND file_hash = %s)
+                   OR (is_public = 1 AND file_hash = %s)
+                LIMIT 1
+            """
+            cursor.execute(query, (user_id, file_hash, file_hash))
+            return cursor.fetchone() is not None
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in check_file_exists: {err}")
+            return False
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
+    def insert_user_file(self, user_id: str, file_name: str, file_path: str, title: str, file_hash: str, is_public: bool) -> bool:
         """
         Inserts a record for an uploaded user file.
         """
@@ -56,8 +80,8 @@ class DBClient:
         try:
             conn = mysql.connector.connect(**self.config)
             cursor = conn.cursor()
-            query = "INSERT INTO user_files (user_id, file_name, file_path, title) VALUES (%s, %s, %s, %s)"
-            cursor.execute(query, (user_id, file_name, file_path, title))
+            query = "INSERT INTO user_files (user_id, file_name, file_path, title, file_hash, is_public) VALUES (%s, %s, %s, %s, %s, %s)"
+            cursor.execute(query, (user_id, file_name, file_path, title, file_hash, int(is_public)))
             conn.commit()
             return True
         except mysql.connector.Error as err:
