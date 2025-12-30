@@ -21,10 +21,13 @@ User: {latest_user_message}
 
 ## Instructions
 1. **Analyze Interface**: Identify the core topic the user is interested in.
-2. **Topic Consistency Check**:
+2. **Strict Topic Consistency Check**:
    - Compare the `latest_user_message` with the `conversation_summary`.
-   - if the topic has clearly changed (e.g. from coding to cooking), DISCARD the old summary and create a NEW one.
-   - If the topic is relevant or continuous, UPDATE the existing summary with new information.
+   - **CRITICAL**: If the user introduces a NEW subject (e.g., switching from "Bear Attacks" to "LLM Curiosity"), you MUST:
+     a) MARK the old summary as "Archived" (or simply discard it).
+     b) Create a FRESH summary focusing ONLY on the new subject.
+     c) Do NOT try to merge unrelated topics.
+   - Only if the topic is clearly continuous, update the existing summary.
 3. **Update Context**: Note the page they are looking at.
 4. **Infer Intent**: Are they exploring, verifying, or debunking?
 5. **Identify Hypotheses**: Frame beliefs/questions as hypotheses.
