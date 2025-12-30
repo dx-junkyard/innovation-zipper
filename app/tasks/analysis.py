@@ -62,12 +62,15 @@ def run_workflow_task(user_id: str, message: str, user_message_id: Optional[str]
             categories = analysis_result.get("categories", [])
 
             if categories:
-                logger.info(f"Topic Service predicted {len(categories)} categories")
+                # 1. Save detailed data (for Graph)
                 final_state["interest_profile"]["categories"] = categories
 
-                # Backward compatibility for current_category
-                if categories[0].get("name"):
-                    final_state["interest_profile"]["current_category"] = categories[0]["name"]
+                # 2. Sync main context (for Conversation)
+                # Use the highest confidence one as current_category
+                primary_category = categories[0]["name"]
+                final_state["interest_profile"]["current_category"] = primary_category
+
+                logger.info(f"Updated category profile: Main='{primary_category}', Count={len(categories)}")
         except Exception as e:
             logger.warning(f"Topic prediction failed: {e}")
         # ---------------------------------
@@ -306,6 +309,9 @@ def process_capture_task(payload: Dict[str, Any]):
                     if categories:
                         # Use top category for memory
                         category_for_memory = categories[0]["name"]
+
+                        # Add full category info to meta
+                        meta["detected_categories"] = categories
 
                         # Update Graph with all found categories/keywords
                         for cat in categories:
