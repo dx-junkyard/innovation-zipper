@@ -2,7 +2,7 @@ import os
 import logging
 import json
 import numpy as np
-from typing import List
+from typing import List, Dict, Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from bertopic import BERTopic
@@ -139,26 +139,67 @@ class TrainRequest(BaseModel):
 @app.post("/predict")
 def predict(payload: PredictRequest):
     if not manager.model:
-        return {"topic_id": -2, "label": "Not Initialized", "probability": 0.0}
+        return {"categories": []}
+
     topics, probs = manager.model.transform([payload.text])
-    topic_id = int(topics[0])
-    info = manager.model.get_topic_info(topic_id)
-    label = "Unknown"
-    if not info.empty:
-        if "CustomName" in info.columns and info["CustomName"].values[0]:
-            label = info["CustomName"].values[0]
-        elif "Name" in info.columns:
-            label = "_".join(info["Name"].values[0].split("_")[1:3])
 
-    prob_value = 0.0
-    if probs is not None:
-        # probs[0] is array -> get max, scalar -> use as is
-        if isinstance(probs[0], (np.ndarray, list)):
-             prob_value = float(np.max(probs[0]))
-        else:
-             prob_value = float(probs[0])
+    # Check if probs is available and has the expected shape
+    if probs is None or len(probs) == 0:
+        return {"categories": []}
 
-    return {"topic_id": topic_id, "label": label, "probability": prob_value}
+    topic_probs = probs[0]
+    categories = []
+
+    if isinstance(topic_probs, (np.ndarray, list)):
+        # Get indices sorted by probability descending
+        sorted_indices = np.argsort(topic_probs)[::-1]
+
+        for idx in sorted_indices:
+            score = float(topic_probs[idx])
+
+            # Threshold check
+            if score < 0.1:
+                break # Since sorted, next ones will be lower
+
+            if len(categories) >= 3:
+                break
+
+            topic_id = int(idx)
+
+            # Fetch Topic Info
+            try:
+                info = manager.model.get_topic_info(topic_id)
+            except:
+                continue
+
+            if info.empty:
+                continue
+
+            label = "Unknown"
+            if "CustomName" in info.columns and info["CustomName"].values[0]:
+                label = info["CustomName"].values[0]
+            elif "Name" in info.columns:
+                name_val = info["Name"].values[0]
+                parts = name_val.split("_")
+                if len(parts) > 2:
+                    label = "_".join(parts[1:3])
+                else:
+                    label = name_val
+
+            # Fetch Keywords
+            raw_keywords = manager.model.get_topic(topic_id)
+            keywords = []
+            if raw_keywords:
+                # Top 3 words
+                keywords = [word for word, score in raw_keywords[:3]]
+
+            categories.append({
+                "name": label,
+                "confidence": score,
+                "keywords": keywords
+            })
+
+    return {"categories": categories}
 
 @app.post("/train")
 def train(payload: TrainRequest):

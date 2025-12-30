@@ -58,11 +58,16 @@ def run_workflow_task(user_id: str, message: str, user_message_id: Optional[str]
         # --- Topic Service Integration ---
         try:
             topic_client = TopicClient()
-            predicted_category = topic_client.predict_category(message)
-            if predicted_category:
-                logger.info(f"Topic Service predicted: {predicted_category}")
-                # Override or fallback the category
-                final_state["interest_profile"]["current_category"] = predicted_category
+            analysis_result = topic_client.analyze_content(message)
+            categories = analysis_result.get("categories", [])
+
+            if categories:
+                logger.info(f"Topic Service predicted {len(categories)} categories")
+                final_state["interest_profile"]["categories"] = categories
+
+                # Backward compatibility for current_category
+                if categories[0].get("name"):
+                    final_state["interest_profile"]["current_category"] = categories[0]["name"]
         except Exception as e:
             logger.warning(f"Topic prediction failed: {e}")
         # ---------------------------------
@@ -71,18 +76,26 @@ def run_workflow_task(user_id: str, message: str, user_message_id: Optional[str]
 
         # --- Knowledge Graph Update Logic ---
         try:
-            # Update User Interest (Current Category)
+            # Update User Interest (Categories & Keywords)
             profile = final_state.get("interest_profile", {})
-            current_category = profile.get("current_category")
+            categories = profile.get("categories", [])
 
-            if current_category:
-                logger.info(f"Updating KG with category: {current_category}")
-                knowledge_manager.graph_manager.add_user_interest(
-                    user_id=user_id,
-                    concept_name=current_category,
-                    confidence=0.9,
-                    source_type="ai_inferred"
-                )
+            # If no categories list, fallback to current_category (backward compatibility)
+            if not categories and profile.get("current_category"):
+                current_cat = profile.get("current_category")
+                categories = [{"name": current_cat, "confidence": 0.9, "keywords": []}]
+
+            for cat in categories:
+                cat_name = cat.get("name")
+                if cat_name:
+                    logger.info(f"Updating KG with category: {cat_name}")
+                    knowledge_manager.graph_manager.add_category_and_keywords(
+                        user_id=user_id,
+                        category_name=cat_name,
+                        confidence=cat.get("confidence", 0.9),
+                        keywords=cat.get("keywords", []),
+                        source_type="ai_inferred"
+                    )
 
             # Update Hypotheses
             hypotheses_data = final_state.get("active_hypotheses", {})
@@ -287,11 +300,24 @@ def process_capture_task(payload: Dict[str, Any]):
                 category_for_memory = "CapturedInterest"
                 try:
                     topic_client = TopicClient()
-                    pred = topic_client.predict_category(content[:500]) # Use first 500 chars
-                    if pred:
-                        category_for_memory = pred
-                except:
-                    pass
+                    analysis = topic_client.analyze_content(content[:500]) # Use first 500 chars
+                    categories = analysis.get("categories", [])
+
+                    if categories:
+                        # Use top category for memory
+                        category_for_memory = categories[0]["name"]
+
+                        # Update Graph with all found categories/keywords
+                        for cat in categories:
+                            knowledge_manager.graph_manager.add_category_and_keywords(
+                                user_id=user_id,
+                                category_name=cat["name"],
+                                confidence=cat["confidence"],
+                                keywords=cat["keywords"],
+                                source_type="ai_inferred_capture"
+                            )
+                except Exception as e:
+                    logger.warning(f"Topic analysis failed in capture: {e}")
                 # ---------------------------------------------
 
                 knowledge_manager.add_user_memory(
