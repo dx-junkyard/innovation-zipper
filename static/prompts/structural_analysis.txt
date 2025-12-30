@@ -1,4 +1,6 @@
 ユーザーの課題をシステム思考に基づき構造分解します。
+Analyze ONLY the current topic defined in the latest user message and situation summary. Discard unrelated past context.
+
 以下の6つの観点で深く分析してください：
 1. Agent (主体): 誰の問題か
 2. Pain (現象): 何が痛点か
