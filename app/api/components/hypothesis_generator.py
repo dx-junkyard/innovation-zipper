@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Dict, Any
 from langchain_core.prompts import PromptTemplate
 from app.api.ai_client import AIClient
+from config import MODEL_HYPOTHESIS_GENERATION
 
 class HypothesisGenerator:
     """
@@ -26,7 +27,7 @@ class HypothesisGenerator:
             Dict[str, Any]: 仮説が追加されたコンテキスト
         """
         prompt = self._create_prompt(context)
-        result = self.ai_client.generate_response(prompt)
+        result = self.ai_client.generate_response(prompt, model=MODEL_HYPOTHESIS_GENERATION)
 
         # If result is a list, it's likely the hypotheses list itself
         if isinstance(result, list):

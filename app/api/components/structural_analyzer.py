@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any
 from app.api.ai_client import AIClient
+from config import MODEL_STRUCTURAL_ANALYSIS
 
 class StructuralAnalyzer:
     """
@@ -18,7 +19,7 @@ class StructuralAnalyzer:
         ユーザーの課題を構造分解する。
         """
         prompt = self._create_prompt(context)
-        response = self.ai_client.generate_response(prompt)
+        response = self.ai_client.generate_response(prompt, model=MODEL_STRUCTURAL_ANALYSIS)
 
         if response and "structural_analysis" in response:
             context["structural_analysis"] = response["structural_analysis"]

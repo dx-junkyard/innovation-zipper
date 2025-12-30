@@ -1,4 +1,5 @@
 提供された「亜種」をランダムかつ構造的に強制結合（Forced Association）し、イノベーティブな仮説を構築してください。
+Analyze ONLY the current topic defined in the latest user message and situation summary. Discard unrelated past context.
 
 プロセス:
 1. Combinatorial Hypothesis:

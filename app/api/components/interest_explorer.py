@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any
 from app.api.ai_client import AIClient
+from config import MODEL_INTEREST_EXPLORATION
 
 class InterestExplorer:
     def __init__(self, ai_client: AIClient):
@@ -12,7 +13,7 @@ class InterestExplorer:
 
     def explore(self, context: Dict[str, Any]) -> Dict[str, Any]:
         prompt = self._create_prompt(context)
-        response = self.ai_client.generate_response(prompt)
+        response = self.ai_client.generate_response(prompt, model=MODEL_INTEREST_EXPLORATION)
 
         result = {
             "bot_message": "...",

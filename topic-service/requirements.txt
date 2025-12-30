@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+bertopic>=0.16.0
+mecab-python3
+ipadic
+sentence-transformers>=2.2.2
+umap-learn
+hdbscan
+spacy
+ja-core-news-sm @ https://github.com/explosion/spacy-models/releases/download/ja_core_news_sm-3.7.0/ja_core_news_sm-3.7.0-py3-none-any.whl
+numpy<2.0.0
+scikit-learn

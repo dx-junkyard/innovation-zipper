@@ -105,3 +105,15 @@ services:
       - "7687:7687"
     environment:
       - NEO4J_AUTH=neo4j/password
+
+  topic-api:
+    build:
+      context: ./topic-service
+      dockerfile: Dockerfile
+    ports:
+      - "8088:8000"
+    volumes:
+      - ./topic-service/models:/app/models
+      - ./topic-service:/app
+    environment:
+      - PYTHONUNBUFFERED=1

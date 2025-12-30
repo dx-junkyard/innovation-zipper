@@ -13,6 +13,8 @@ from app.api.ai_client import AIClient
 from app.api.db import DBClient
 from app.api.state_manager import StateManager
 from app.api.components.knowledge_manager import KnowledgeManager
+from app.api.components.topic_client import TopicClient
+from config import MODEL_CAPTURE_FILTERING, MODEL_HOT_CACHE
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +54,18 @@ def run_workflow_task(user_id: str, message: str, user_message_id: Optional[str]
         # 4. Run Workflow
         final_state = workflow_manager.invoke(initial_state)
         bot_message = final_state.get("bot_message", "申し訳ありません、エラーが発生しました。")
+
+        # --- Topic Service Integration ---
+        try:
+            topic_client = TopicClient()
+            predicted_category = topic_client.predict_category(message)
+            if predicted_category:
+                logger.info(f"Topic Service predicted: {predicted_category}")
+                # Override or fallback the category
+                final_state["interest_profile"]["current_category"] = predicted_category
+        except Exception as e:
+            logger.warning(f"Topic prediction failed: {e}")
+        # ---------------------------------
 
         # 5. Save Results
 
@@ -158,6 +172,18 @@ def process_document_task(user_id: str, file_path: str, title: str, file_id: str
         for i in range(0, len(text_content), chunk_size - overlap):
             chunks.append(text_content[i:i + chunk_size])
 
+        # Infer category using TopicClient
+        try:
+            topic_client = TopicClient()
+            # Use first 1000 chars for prediction
+            predicted_category = topic_client.predict_category(text_content[:1000])
+        except Exception as e:
+            print(f"Topic prediction failed for document: {e}")
+            predicted_category = None
+
+        # Fallback if prediction fails or returns None
+        final_category = predicted_category if predicted_category else "Uncategorized"
+
         success_count = 0
         for i, chunk in enumerate(chunks):
             # Add to Knowledge Base with Metadata
@@ -174,7 +200,7 @@ def process_document_task(user_id: str, file_path: str, title: str, file_id: str
                 user_id=user_id,
                 content=chunk,
                 memory_type="document_chunk",
-                category="General", # Or infer category later
+                category=final_category,
                 meta=meta
             ):
                 success_count += 1
@@ -226,7 +252,7 @@ def process_capture_task(payload: Dict[str, Any]):
 
         prompt = prompt_template.replace("{content}", content[:2000]) # Limit content for token efficiency
 
-        classification_res = ai_client.generate_json(prompt, {"category": "string", "reason": "string"})
+        classification_res = ai_client.generate_json(prompt, model=MODEL_CAPTURE_FILTERING)
 
         category = classification_res.get("category", "Notification")
         reason = classification_res.get("reason", "")
@@ -257,11 +283,22 @@ def process_capture_task(payload: Dict[str, Any]):
             if visibility == "public":
                 knowledge_manager.add_shared_fact(summary, "webhook_capture", meta)
             else:
+                # --- Topic Service Integration for Capture ---
+                category_for_memory = "CapturedInterest"
+                try:
+                    topic_client = TopicClient()
+                    pred = topic_client.predict_category(content[:500]) # Use first 500 chars
+                    if pred:
+                        category_for_memory = pred
+                except:
+                    pass
+                # ---------------------------------------------
+
                 knowledge_manager.add_user_memory(
                     user_id=user_id,
                     content=summary,
                     memory_type="user_hypothesis",
-                    category="CapturedInterest",
+                    category=category_for_memory,
                     meta=meta
                 )
 
@@ -345,7 +382,7 @@ def generate_hot_cache_task(user_id: str):
             memories="\n".join(memories) if memories else "None"
         )
 
-        result = ai_client.generate_json(prompt, {"suggestions": ["string"]})
+        result = ai_client.generate_json(prompt, model=MODEL_HOT_CACHE)
 
         # 3. Save to Redis
         if result and "suggestions" in result:

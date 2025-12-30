@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any
 from app.api.ai_client import AIClient
+from config import MODEL_INNOVATION_SYNTHESIS
 
 class VariantGenerator:
     """
@@ -18,7 +19,7 @@ class VariantGenerator:
         構造分解された要素から亜種を生成する。
         """
         prompt = self._create_prompt(context)
-        response = self.ai_client.generate_response(prompt)
+        response = self.ai_client.generate_response(prompt, model=MODEL_INNOVATION_SYNTHESIS)
 
         if response and "idea_variants" in response:
             context["idea_variants"] = response["idea_variants"]

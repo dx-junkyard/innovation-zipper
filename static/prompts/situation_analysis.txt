@@ -21,14 +21,35 @@ User: {latest_user_message}
 
 ## Instructions
 1. **Analyze Interface**: Identify the core topic the user is interested in.
-2. **Topic Consistency Check**:
+2. **Strict Topic Consistency Check**:
    - Compare the `latest_user_message` with the `conversation_summary`.
-   - if the topic has clearly changed (e.g. from coding to cooking), DISCARD the old summary and create a NEW one.
-   - If the topic is relevant or continuous, UPDATE the existing summary with new information.
+   - **CRITICAL**: If the user introduces a NEW subject (e.g., switching from "Bear Attacks" to "LLM Curiosity"), you MUST:
+     a) MARK the old summary as "Archived" (or simply discard it).
+     b) Create a FRESH summary focusing ONLY on the new subject.
+     c) Do NOT try to merge unrelated topics.
+   - Only if the topic is clearly continuous, update the existing summary.
 3. **Update Context**: Note the page they are looking at.
 4. **Infer Intent**: Are they exploring, verifying, or debunking?
 5. **Identify Hypotheses**: Frame beliefs/questions as hypotheses.
-6. **Categorize**: Classify the current topic into a broad category (e.g., Technology, Business, Hobbies, Housework, etc.) and set it to `current_category`.
+6. Categorize: Classify the current topic into one of the following specific categories and set it to `current_category`. If none fit perfectly, choose the closest one.
+   - 政治_行政_法律_政策
+   - 経済_金融_ビジネス_産業
+   - 国際_社会問題_平和_人権
+   - 労働_働き方_キャリア
+   - 自然_環境_宇宙_気候
+   - 科学_数学_物理_生命
+   - IT_テクノロジー_AI_情報
+   - 工学_製造_建築_インフラ
+   - 医療_健康_身体_ヘルスケア
+   - 心理_メンタル_精神_哲学
+   - 歴史_文化_言語_人類学
+   - 芸術_アート_デザイン_表現
+   - エンタメ_サブカル_娯楽
+   - 生活_家事_住まい_育児
+   - 料理_グルメ_食文化
+   - 趣味_旅行_レジャー_活動
+   - 教育_学習_自己啓発
+   - 人間関係_家族_恋愛_対話
 
 ## Output Guide for conversation_summary
 - If Topic Changed: "User switched topic to [New Topic]. key points: ..."

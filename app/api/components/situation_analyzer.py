@@ -4,6 +4,7 @@ from typing import Dict, Any, List
 from langchain_core.prompts import PromptTemplate
 from app.api.ai_client import AIClient
 from app.api.state_manager import StateManager
+from config import MODEL_SITUATION_ANALYSIS
 
 class SituationAnalyzer:
     """
@@ -32,7 +33,7 @@ class SituationAnalyzer:
         prompt = self._create_prompt(context)
 
         # Use generic generate_response instead of analyze_interaction
-        analysis_result = self.ai_client.generate_response(prompt)
+        analysis_result = self.ai_client.generate_response(prompt, model=MODEL_SITUATION_ANALYSIS)
 
         if analysis_result:
             normalized_analysis = StateManager.normalize_analysis(analysis_result)

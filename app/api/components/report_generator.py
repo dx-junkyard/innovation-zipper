@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any
 from app.api.ai_client import AIClient
+from config import MODEL_REPORT_GENERATION
 
 class ReportGenerator:
     """
@@ -35,7 +36,7 @@ class ReportGenerator:
         # Actually, let's look at `ai_client.py`.
         # I'll check if it strictly expects JSON.
 
-        response = self.ai_client.generate_response(prompt)
+        response = self.ai_client.generate_response(prompt, model=MODEL_REPORT_GENERATION)
 
         # Assuming the AI returns something like {"report": "markdown content"} or similar if I asked for it.
         # Since I can't change the prompt file content (it was specified by user),

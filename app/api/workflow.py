@@ -10,6 +10,7 @@ from app.api.components.gap_analyzer import GapAnalyzer
 from app.api.components.response_planner import ResponsePlanner
 from app.api.components.knowledge_manager import KnowledgeManager
 from app.api.ai_client import AIClient
+from app.api.components.topic_client import TopicClient
 
 # New components
 from app.api.components.intent_router import IntentRouter
@@ -176,22 +177,42 @@ class WorkflowManager:
     def _situation_analysis_node(self, state: GraphState) -> Dict[str, Any]:
         """状況整理ノード"""
         updated_context = self.situation_analyzer.analyze(state.copy())
+
+        # Ensure category is valid (not "General" or None) using TopicClient if needed
+        interest_profile = updated_context.get("interest_profile", {})
+        current_category = interest_profile.get("current_category")
+
+        if not current_category or current_category == "General":
+            try:
+                topic_client = TopicClient()
+                user_msg = state.get("user_message", "")
+                if user_msg:
+                    predicted_category = topic_client.predict_category(user_msg)
+                    if predicted_category:
+                        current_category = predicted_category
+                        interest_profile["current_category"] = current_category
+            except Exception as e:
+                print(f"Topic prediction failed in situation analysis: {e}")
+
+            # Fallback if still invalid
+            if not current_category or current_category == "General":
+                current_category = "Uncategorized"
+                interest_profile["current_category"] = current_category
+
+        updated_context["interest_profile"] = interest_profile
+
         # Memory Consolidation
         user_id = state.get("user_id")
         if user_id:
-            interest_profile = updated_context.get("interest_profile")
-            if interest_profile:
-                topics = interest_profile.get("topics", [])
-                current_category = interest_profile.get("current_category", "General")
-                intent_goal = interest_profile.get("intent", {}).get("goal")
-                if intent_goal:
-                     self.knowledge_manager.add_user_memory(
-                        user_id=user_id,
-                        content=f"User Goal: {intent_goal}",
-                        memory_type="ai_insight",
-                        category=current_category,
-                        meta={"source": "situation_analysis"}
-                    )
+            intent_goal = interest_profile.get("intent", {}).get("goal")
+            if intent_goal:
+                 self.knowledge_manager.add_user_memory(
+                    user_id=user_id,
+                    content=f"User Goal: {intent_goal}",
+                    memory_type="ai_insight",
+                    category=current_category, # Now guaranteed to be predicted if possible
+                    meta={"source": "situation_analysis"}
+                )
         return {
             "interest_profile": updated_context["interest_profile"],
             "active_hypotheses": updated_context["active_hypotheses"],

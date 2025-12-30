@@ -70,7 +70,7 @@ class KnowledgeManager:
                 vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE),
             )
 
-    def add_user_memory(self, user_id: str, content: str, memory_type: str = "user_hypothesis", category: str = "General", meta: Dict[str, Any] = None) -> bool:
+    def add_user_memory(self, user_id: str, content: str, memory_type: str = "user_hypothesis", category: str = None, meta: Dict[str, Any] = None) -> bool:
         """
         L1/L2: Save private user memory or AI insight.
         """
