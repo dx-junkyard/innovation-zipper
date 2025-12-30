@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any
 from app.api.ai_client import AIClient
+from config import LLM_MODEL_COMPLEX
 
 class InnovationSynthesizer:
     """
@@ -18,7 +19,7 @@ class InnovationSynthesizer:
         亜種を結合して仮説を構築する。
         """
         prompt = self._create_prompt(context)
-        response = self.ai_client.generate_response(prompt, model="gpt-4o")
+        response = self.ai_client.generate_response(prompt, model=LLM_MODEL_COMPLEX)
 
         if response:
             if "innovation_hypotheses" in response:

@@ -14,6 +14,7 @@ from app.api.db import DBClient
 from app.api.state_manager import StateManager
 from app.api.components.knowledge_manager import KnowledgeManager
 from app.api.components.topic_client import TopicClient
+from config import LLM_MODEL_SIMPLE
 
 logger = logging.getLogger(__name__)
 
@@ -239,7 +240,7 @@ def process_capture_task(payload: Dict[str, Any]):
 
         prompt = prompt_template.replace("{content}", content[:2000]) # Limit content for token efficiency
 
-        classification_res = ai_client.generate_json(prompt, model="gpt-4o-mini")
+        classification_res = ai_client.generate_json(prompt, model=LLM_MODEL_SIMPLE)
 
         category = classification_res.get("category", "Notification")
         reason = classification_res.get("reason", "")
@@ -369,7 +370,7 @@ def generate_hot_cache_task(user_id: str):
             memories="\n".join(memories) if memories else "None"
         )
 
-        result = ai_client.generate_json(prompt, model="gpt-4o-mini")
+        result = ai_client.generate_json(prompt, model=LLM_MODEL_SIMPLE)
 
         # 3. Save to Redis
         if result and "suggestions" in result:

@@ -4,6 +4,8 @@
 import os
 
 LLM_MODEL = os.getenv("LLM_MODEL") or "gpt-5-mini"
+LLM_MODEL_COMPLEX = os.getenv("LLM_MODEL_COMPLEX") or "gpt-4o"
+LLM_MODEL_SIMPLE = os.getenv("LLM_MODEL_SIMPLE") or "gpt-4o-mini"
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL") or "text-embedding-3-small"
 EMBEDDING_DIMENSION = int(os.getenv("EMBEDDING_DIMENSION") or 1536)
 AI_URL = "http://host.docker.internal:11434"
