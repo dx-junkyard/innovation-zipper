@@ -25,8 +25,15 @@ ZERO_SHOT_TOPICS = ["Health_Medical", "IT_Tech", "Travel_Leisure", "Food_Cooking
 
 class JapaneseTokenizer:
     def __init__(self):
+        self._init_tagger()
+
+    def _init_tagger(self):
         self.tagger = MeCab.Tagger(ipadic.MECAB_ARGS)
+
     def __call__(self, text):
+        if not hasattr(self, "tagger") or self.tagger is None:
+            self._init_tagger()
+
         node = self.tagger.parseToNode(text)
         words = []
         while node:
@@ -34,6 +41,16 @@ class JapaneseTokenizer:
                 words.append(node.surface)
             node = node.next
         return words
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        if "tagger" in state:
+            del state["tagger"]
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._init_tagger()
 
 class TopicModelManager:
     def __init__(self):
