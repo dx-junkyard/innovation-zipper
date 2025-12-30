@@ -19,7 +19,7 @@ class GapAnalyzer:
         検索結果のギャップ分析を実行する。
         """
         prompt = self._create_prompt(context)
-        response = self.ai_client.generate_json(prompt)
+        response = self.ai_client.generate_json(prompt, model="gpt-4o")
 
         knowledge_gaps = []
         if response and isinstance(response, dict) and "knowledge_gaps" in response:

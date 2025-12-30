@@ -80,24 +80,26 @@ class AIClient:
         """
         return model.startswith("gpt-5") or model.startswith("o1")
 
-    def generate_response(self, prompt: str) -> Optional[Dict[str, Any]]:
+    def generate_response(self, prompt: str, model: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         LLMを使用して応答を生成する汎用メソッド。
 
         Args:
             prompt (str): プロンプト
+            model (Optional[str]): 使用するモデル（指定がなければデフォルト）
 
         Returns:
             Optional[Dict[str, Any]]: 生成されたJSONレスポンス
         """
-        logger.info("Prompt sent to LLM: %s", prompt)
+        target_model = model or self.model
+        logger.info("Prompt sent to LLM (Model: %s): %s", target_model, prompt)
 
         if self.openai_client:
             try:
-                if self._is_reasoning_model(self.model):
+                if self._is_reasoning_model(target_model):
                     # GPT-5 specific connection
                     response = self.openai_client.responses.create(
-                        model=self.model,
+                        model=target_model,
                         reasoning={"effort": "medium"},
                         input=[
                             {"role": "user", "content": prompt}
@@ -128,7 +130,7 @@ class AIClient:
                         raw_text = str(response)
                 else:
                     response = self.openai_client.chat.completions.create(
-                        model=self.model,
+                        model=target_model,
                         messages=[
                             {"role": "system", "content": "You are a helpful assistant."},
                             {"role": "user", "content": prompt}
@@ -144,7 +146,7 @@ class AIClient:
             try:
                 response = requests.post(
                     self.api_url,
-                    json={"model": self.model, "prompt": prompt, "stream": False},
+                    json={"model": target_model, "prompt": prompt, "stream": False},
                     timeout=120,
                 )
                 response.raise_for_status()
@@ -159,11 +161,11 @@ class AIClient:
             logger.error("LLM からの応答を JSON として解析できませんでした。")
         return parsed
 
-    def generate_json(self, prompt: str) -> Optional[Dict[str, Any]]:
+    def generate_json(self, prompt: str, model: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         JSON形式の応答を生成する（generate_responseのエイリアス）。
         """
-        return self.generate_response(prompt)
+        return self.generate_response(prompt, model=model)
 
     def get_embedding(self, text: str) -> List[float]:
         """

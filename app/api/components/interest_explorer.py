@@ -12,7 +12,7 @@ class InterestExplorer:
 
     def explore(self, context: Dict[str, Any]) -> Dict[str, Any]:
         prompt = self._create_prompt(context)
-        response = self.ai_client.generate_response(prompt)
+        response = self.ai_client.generate_response(prompt, model="gpt-4o")
 
         result = {
             "bot_message": "...",

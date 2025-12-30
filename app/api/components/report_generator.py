@@ -35,7 +35,7 @@ class ReportGenerator:
         # Actually, let's look at `ai_client.py`.
         # I'll check if it strictly expects JSON.
 
-        response = self.ai_client.generate_response(prompt)
+        response = self.ai_client.generate_response(prompt, model="gpt-4o")
 
         # Assuming the AI returns something like {"report": "markdown content"} or similar if I asked for it.
         # Since I can't change the prompt file content (it was specified by user),

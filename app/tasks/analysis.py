@@ -239,7 +239,7 @@ def process_capture_task(payload: Dict[str, Any]):
 
         prompt = prompt_template.replace("{content}", content[:2000]) # Limit content for token efficiency
 
-        classification_res = ai_client.generate_json(prompt, {"category": "string", "reason": "string"})
+        classification_res = ai_client.generate_json(prompt, model="gpt-4o-mini")
 
         category = classification_res.get("category", "Notification")
         reason = classification_res.get("reason", "")
@@ -369,7 +369,7 @@ def generate_hot_cache_task(user_id: str):
             memories="\n".join(memories) if memories else "None"
         )
 
-        result = ai_client.generate_json(prompt, {"suggestions": ["string"]})
+        result = ai_client.generate_json(prompt, model="gpt-4o-mini")
 
         # 3. Save to Redis
         if result and "suggestions" in result:

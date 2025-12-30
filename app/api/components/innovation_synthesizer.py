@@ -18,7 +18,7 @@ class InnovationSynthesizer:
         亜種を結合して仮説を構築する。
         """
         prompt = self._create_prompt(context)
-        response = self.ai_client.generate_response(prompt)
+        response = self.ai_client.generate_response(prompt, model="gpt-4o")
 
         if response:
             if "innovation_hypotheses" in response:

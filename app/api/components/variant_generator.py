@@ -18,7 +18,7 @@ class VariantGenerator:
         構造分解された要素から亜種を生成する。
         """
         prompt = self._create_prompt(context)
-        response = self.ai_client.generate_response(prompt)
+        response = self.ai_client.generate_response(prompt, model="gpt-4o")
 
         if response and "idea_variants" in response:
             context["idea_variants"] = response["idea_variants"]

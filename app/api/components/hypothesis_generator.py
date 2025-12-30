@@ -26,7 +26,7 @@ class HypothesisGenerator:
             Dict[str, Any]: 仮説が追加されたコンテキスト
         """
         prompt = self._create_prompt(context)
-        result = self.ai_client.generate_response(prompt)
+        result = self.ai_client.generate_response(prompt, model="gpt-4o")
 
         # If result is a list, it's likely the hypotheses list itself
         if isinstance(result, list):

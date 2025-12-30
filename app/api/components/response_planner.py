@@ -27,7 +27,7 @@ class ResponsePlanner:
         """
         prompt = self._create_prompt(context)
 
-        result = self.ai_client.generate_response(prompt)
+        result = self.ai_client.generate_response(prompt, model="gpt-4o")
 
         bot_message = "申し訳ありません、うまく応答を生成できませんでした。"
         if result:
