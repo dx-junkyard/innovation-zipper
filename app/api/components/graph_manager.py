@@ -193,9 +193,8 @@ class GraphManager:
         query = f"""
         MATCH (u:{self.LABEL_USER} {{id: $user_id}})-[:{self.REL_INTERESTED_IN}]->(c:{self.LABEL_CONCEPT})
 
-        // Calculate the degree (number of relationships connected to concept c)
-        // Neo4j 5.x syntax replacement: size((c)--()) -> COUNT { (c)--() }
-        WITH c, COUNT { (c)--() } as degree
+        // Calculate the degree using COUNT subquery (escaped for f-string)
+        WITH c, COUNT {{ (c)--() }} as degree
 
         WHERE degree > 0
         RETURN c.name as name, degree
