@@ -1,7 +1,7 @@
 import requests
 import os
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
@@ -9,9 +9,10 @@ class TopicClient:
     def __init__(self):
         self.api_url = os.getenv("TOPIC_API_URL", "http://topic-api:8000")
 
-    def predict_category(self, text: str) -> Optional[str]:
+    def analyze_content(self, text: str) -> Dict[str, Any]:
         """
-        Returns the category label (e.g., 'Health_Medical') or None.
+        Analyzes the text and returns a list of categories with keywords.
+        Returns format: {"categories": [{"name": "...", "confidence": 0.9, "keywords": [...]}, ...]}
         """
         try:
             resp = requests.post(
@@ -20,15 +21,25 @@ class TopicClient:
                 timeout=5.0
             )
             if resp.status_code == 200:
-                data = resp.json()
-                label = data.get("label")
-                # Exclude outliers/unknowns if necessary
-                if label and label not in ["Unknown", "Outlier", "Not Initialized"]:
-                    return label
-            return None
+                return resp.json()
+            return {"categories": []}
         except Exception as e:
             logger.warning(f"Topic API call failed: {e}")
-            return None
+            return {"categories": []}
+
+    def predict_category(self, text: str) -> Optional[str]:
+        """
+        Returns the top category label (e.g., 'Health_Medical') or None.
+        Kept for backward compatibility.
+        """
+        result = self.analyze_content(text)
+        categories = result.get("categories", [])
+        if categories:
+            top_category = categories[0]
+            label = top_category.get("name")
+            if label and label not in ["Unknown", "Outlier", "Not Initialized"]:
+                return label
+        return None
 
     def train_model(self, texts: list):
         # Implementation for background training...

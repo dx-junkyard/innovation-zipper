@@ -6,11 +6,13 @@ class GraphManager:
     # Node Labels
     LABEL_USER = "User"
     LABEL_CONCEPT = "Concept"
+    LABEL_KEYWORD = "Keyword"
     LABEL_HYPOTHESIS = "Hypothesis"
     LABEL_DOCUMENT = "Document"
 
     # Edge Types
     REL_INTERESTED_IN = "INTERESTED_IN"
+    REL_BELONGS_TO = "BELONGS_TO"
     REL_MENTIONED_IN = "MENTIONED_IN"
     REL_IMPLIES = "IMPLIES"
     REL_VERIFIED_BY = "VERIFIED_BY"
@@ -90,6 +92,40 @@ class GraphManager:
                 session.run(query, user_id=user_id, name=concept_name, confidence=confidence, source_type=source_type)
         except Exception as e:
             print(f"Error adding interest edge: {e}")
+
+    def add_category_and_keywords(self, user_id: str, category_name: str, confidence: float, keywords: List[str], source_type: str = "ai_inferred"):
+        """
+        Adds a category and its keywords to the user's interest graph.
+        User -> INTERESTED_IN -> Concept
+        User -> INTERESTED_IN -> Keyword
+        Keyword -> BELONGS_TO -> Concept
+        """
+        if not self.driver: return
+
+        self.add_user_interest(user_id, category_name, confidence, source_type)
+
+        if not keywords:
+            return
+
+        query = f"""
+        MATCH (u:{self.LABEL_USER} {{id: $user_id}})
+        MATCH (c:{self.LABEL_CONCEPT} {{name: $category_name}})
+
+        UNWIND $keywords as kw
+        MERGE (k:{self.LABEL_KEYWORD} {{name: kw}})
+
+        // Link User to Keyword
+        MERGE (u)-[r1:{self.REL_INTERESTED_IN}]->(k)
+        SET r1.confidence = $confidence, r1.source_type = $source_type, r1.updated_at = datetime()
+
+        // Link Keyword to Concept
+        MERGE (k)-[r2:{self.REL_BELONGS_TO}]->(c)
+        """
+        try:
+            with self.driver.session() as session:
+                session.run(query, user_id=user_id, category_name=category_name, keywords=keywords, confidence=confidence, source_type=source_type)
+        except Exception as e:
+            print(f"Error adding structured interests: {e}")
 
     def add_hypothesis(self, text: str, evidence_ids: List[str] = None, properties: Dict[str, Any] = None):
         """Adds a Hypothesis node."""
