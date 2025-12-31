@@ -159,7 +159,7 @@ async def get_knowledge_graph(user_id: str = Query(..., description="User ID"), 
     graph_manager = GraphManager()
 
     # 1. Get Central Concepts
-    concepts = graph_manager.get_central_concepts(user_id, limit=limit)
+    graph_data = graph_manager.get_central_concepts(user_id, limit=limit)
 
     # 2. Convert to Nodes and Edges format for UI
     nodes = []
@@ -168,9 +168,9 @@ async def get_knowledge_graph(user_id: str = Query(..., description="User ID"), 
     # Simple color scheme
     CONCEPT_COLOR = "#5DADE2"
 
-    for concept in concepts:
-        name = concept.get("name")
-        degree = concept.get("degree", 1)
+    for n in graph_data.get("nodes", []):
+        name = n.get("name")
+        degree = n.get("degree", 1)
 
         # Scale size based on degree (min 15, max 50 approximately)
         size = 15 + min(degree * 2, 35)
@@ -183,10 +183,9 @@ async def get_knowledge_graph(user_id: str = Query(..., description="User ID"), 
             "type": "Concept"
         })
 
-        # Optionally, we could add edges between these top concepts if they exist
-        # For now, we return just the nodes as 'Hubs'
+    # Pass through edges from GraphManager
+    edges = graph_data.get("edges", [])
 
-    # Use 'nodes' and 'edges' keys to match UI expectations
     return {"nodes": nodes, "edges": edges}
 
 from fastapi.responses import StreamingResponse
