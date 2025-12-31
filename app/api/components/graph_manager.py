@@ -177,41 +177,53 @@ class GraphManager:
             print(f"Error retrieving user interests: {e}")
         return results
 
-    def get_central_concepts(self, user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_central_concepts(self, user_id: str, limit: int = 10) -> Dict[str, List[Any]]:
         """
-        Retrieves 'Hub' concepts for the user based on degree centrality.
-        These concepts are connected to many other nodes (Hypotheses, Keywords, etc.)
-        and serve as good starting points for exploration.
+        Retrieves 'Hub' concepts AND their connections.
+        Returns: {"nodes": [...], "edges": [...]}
         """
-        if not self.driver: return []
+        if not self.driver: return {"nodes": [], "edges": []}
 
-        # Cypher Query Logic:
-        # 1. Match Concepts that the user is interested in.
-        # 2. Calculate the 'degree' (number of connections) for each Concept.
-        #    Note: We count all relationships ((c)--()) to capture links to Hypotheses, Keywords, etc.
-        # 3. Return the top N concepts with the highest degree.
+        # 1. ノード取得と、2. エッジ取得をまとめて行うクエリ
+        # (f-stringのエスケープ {{ }} に注意)
         query = f"""
         MATCH (u:{self.LABEL_USER} {{id: $user_id}})-[:{self.REL_INTERESTED_IN}]->(c:{self.LABEL_CONCEPT})
 
-        // Calculate the degree using COUNT subquery (escaped for f-string)
+        // 次数計算
         WITH c, COUNT {{ (c)--() }} as degree
-
         WHERE degree > 0
-        RETURN c.name as name, degree
+
+        // 上位N件に絞り込み
+        WITH c, degree
         ORDER BY degree DESC
         LIMIT $limit
+
+        // コレクションとしてまとめる
+        WITH collect(c) as concepts, collect({{name: c.name, degree: degree}}) as nodes_data
+
+        // 抽出されたコンセプト同士の関係を探す
+        UNWIND concepts as c1
+        UNWIND concepts as c2
+        OPTIONAL MATCH (c1)-[r]->(c2)
+        WHERE id(c1) < id(c2) // 重複排除
+
+        RETURN nodes_data, collect(DISTINCT {{source: c1.name, target: c2.name, label: type(r)}}) as edges_data
         """
 
-        results = []
         try:
             with self.driver.session() as session:
                 result = session.run(query, user_id=user_id, limit=limit)
-                for record in result:
-                    results.append(record.data())
+                record = result.single()
+                if record:
+                    return {
+                        "nodes": record["nodes_data"],
+                        # edges_data内の None (関係なし) をフィルタリング
+                        "edges": [e for e in record["edges_data"] if e["label"] is not None]
+                    }
         except Exception as e:
-            print(f"Error retrieving central concepts: {e}")
+            print(f"Error retrieving knowledge graph: {e}")
 
-        return results
+        return {"nodes": [], "edges": []}
 
     def clear_database(self):
         """Clears the entire graph (Use with caution!)."""

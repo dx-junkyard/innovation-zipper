@@ -135,11 +135,13 @@ def render_knowledge_explorer():
             symbolType="circle"
         ))
 
-    for e in data["edges"]:
+    for e in data.get("edges", []):
         edges.append(Edge(
             source=e["source"],
             target=e["target"],
-            type=e.get("type", "RELATED")
+            label=e.get("label", ""),  # 関係名を表示
+            type="STRAIGHT",           # 線を直線に
+            color="#CCCCCC"            # 薄いグレーで見やすく
         ))
 
     config = Config(
@@ -155,7 +157,7 @@ def render_knowledge_explorer():
 
     # グラフ描画とクリックイベントの取得
     st.caption("ノードをクリックして詳細を確認し、分析を開始できます。")
-    selected_node_id = agraph(nodes=nodes, edges=edges, config=config)
+    selected_node_id = agraph(nodes=nodes, edges=edges, config=config, key="knowledge_graph_view")
 
     if selected_node_id:
         st.divider()
