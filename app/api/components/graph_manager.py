@@ -194,9 +194,8 @@ class GraphManager:
         MATCH (u:{self.LABEL_USER} {{id: $user_id}})-[:{self.REL_INTERESTED_IN}]->(c:{self.LABEL_CONCEPT})
 
         // Calculate the degree (number of relationships connected to concept c)
-        // We exclude the 'INTERESTED_IN' relationship from the user to avoid counting the user link itself bias,
-        // or just count everything if simpler. Here we count all connections to measure 'richness'.
-        WITH c, size((c)--()) as degree
+        // Neo4j 5.x syntax replacement: size((c)--()) -> COUNT { (c)--() }
+        WITH c, COUNT { (c)--() } as degree
 
         WHERE degree > 0
         RETURN c.name as name, degree
