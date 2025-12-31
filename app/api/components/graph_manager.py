@@ -177,6 +177,44 @@ class GraphManager:
             print(f"Error retrieving user interests: {e}")
         return results
 
+    def get_central_concepts(self, user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Retrieves 'Hub' concepts for the user based on degree centrality.
+        These concepts are connected to many other nodes (Hypotheses, Keywords, etc.)
+        and serve as good starting points for exploration.
+        """
+        if not self.driver: return []
+
+        # Cypher Query Logic:
+        # 1. Match Concepts that the user is interested in.
+        # 2. Calculate the 'degree' (number of connections) for each Concept.
+        #    Note: We count all relationships ((c)--()) to capture links to Hypotheses, Keywords, etc.
+        # 3. Return the top N concepts with the highest degree.
+        query = f"""
+        MATCH (u:{self.LABEL_USER} {{id: $user_id}})-[:{self.REL_INTERESTED_IN}]->(c:{self.LABEL_CONCEPT})
+
+        // Calculate the degree (number of relationships connected to concept c)
+        // We exclude the 'INTERESTED_IN' relationship from the user to avoid counting the user link itself bias,
+        // or just count everything if simpler. Here we count all connections to measure 'richness'.
+        WITH c, size((c)--()) as degree
+
+        WHERE degree > 0
+        RETURN c.name as name, degree
+        ORDER BY degree DESC
+        LIMIT $limit
+        """
+
+        results = []
+        try:
+            with self.driver.session() as session:
+                result = session.run(query, user_id=user_id, limit=limit)
+                for record in result:
+                    results.append(record.data())
+        except Exception as e:
+            print(f"Error retrieving central concepts: {e}")
+
+        return results
+
     def clear_database(self):
         """Clears the entire graph (Use with caution!)."""
         if not self.driver: return
