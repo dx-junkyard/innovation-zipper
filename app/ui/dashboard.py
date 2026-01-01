@@ -212,11 +212,11 @@ def render_graph_view():
     st.caption("ノードをクリックして詳細を確認できます。")
 
     # keyを指定して状態を維持
+    # Note: 環境によっては key 引数がエラーになる場合があるため削除
     selected_node_id = agraph(
         nodes=st.session_state["graph_nodes"],
         edges=st.session_state["graph_edges"],
-        config=config,
-        key="main_graph"
+        config=config
     )
 
     # 3. インタラクション処理

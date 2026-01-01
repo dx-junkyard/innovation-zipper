@@ -21,3 +21,6 @@ INFO:line_login:Login URL: https://access.line.me/oauth2/v2.1/authorize?response
 INFO:line_login:Received query params: {}
 INFO:line_login:Generated OAuth state: 28bc6c7f46e6f5b8d93a31a566d156f8
 INFO:line_login:Login URL: https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=None&redirect_uri=http%3A%2F%2Flocalhost%3A8080&scope=profile+openid&state=28bc6c7f46e6f5b8d93a31a566d156f8
+INFO:line_login:Received query params: {}
+INFO:line_login:Generated OAuth state: a255eb76972e6bdae1065476739a7066
+INFO:line_login:Login URL: https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=None&redirect_uri=http%3A%2F%2Flocalhost%3A8080&scope=profile+openid&state=a255eb76972e6bdae1065476739a7066
