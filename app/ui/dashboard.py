@@ -112,7 +112,7 @@ def render_innovation_zipper(analysis_data):
 
     st.graphviz_chart(graph)
 
-def render_knowledge_explorer():
+def render_graph_view():
     st.subheader("Explore your Interest Graph")
 
     user_id = st.session_state.get("user_id")
@@ -122,56 +122,98 @@ def render_knowledge_explorer():
         st.info("まだ十分な知識データがありません。チャットで興味のある話題について話しかけてみてください。")
         return
 
+    # ノードスタイルの定義
+    NODE_STYLES = {
+        "Concept": {"color": "#5DADE2", "size": 25, "symbolType": "circle"},  # Blue
+        "Category": {"color": "#5DADE2", "size": 25, "symbolType": "circle"}, # Alias
+        "Keyword": {"color": "#82E0AA", "size": 15, "symbolType": "diamond"}, # Green
+        "Hypothesis": {"color": "#E74C3C", "size": 20, "symbolType": "triangle"}, # Red
+        "User": {"color": "#F1C40F", "size": 30, "symbolType": "star"}        # Yellow
+    }
+
     # agraph用データ変換
     nodes = []
     edges = []
 
     for n in data["nodes"]:
+        # ノードタイプに基づくスタイル適用
+        node_type = n.get("type", "Concept")
+        style = NODE_STYLES.get(node_type, NODE_STYLES["Concept"])
+
+        # APIからの色指定があれば優先、なければスタイルの色
+        color = n.get("color") or style["color"]
+        size = n.get("size") or style["size"]
+
         nodes.append(Node(
             id=n["id"],
             label=n["label"],
-            size=n["size"],
-            color=n.get("color", "#5DADE2"),
-            symbolType="circle"
+            size=size,
+            color=color,
+            symbolType=style.get("symbolType", "circle"),
+            # 追加プロパティを保持 (titleなど)
+            title=n.get("label") # ホバー時に表示
         ))
 
     for e in data["edges"]:
         edges.append(Edge(
             source=e["source"],
             target=e["target"],
-            type=e.get("type", "RELATED")
+            type=e.get("type", "RELATED"),
+            color="#BDC3C7"
         ))
 
     config = Config(
-        width=700,
-        height=500,
+        width="100%",
+        height=600,
         directed=True,
         physics=True,
         hierarchical=False,
         nodeHighlightBehavior=True,
         highlightColor="#F7A7A6",
-        collapsible=False
+        collapsible=False,
+        node={"labelProperty": "label"},
+        link={"labelProperty": "type", "renderLabel": False}
     )
 
     # グラフ描画とクリックイベントの取得
-    st.caption("ノードをクリックして詳細を確認し、分析を開始できます。")
+    st.caption("ノードをクリックして詳細を確認できます。")
+
+    # 状態保持のためのkey設定
     selected_node_id = agraph(nodes=nodes, edges=edges, config=config)
 
+    # 詳細情報の表示
     if selected_node_id:
+        # 選択されたノードのデータを検索
+        selected_node = next((n for n in data["nodes"] if n["id"] == selected_node_id), None)
+
         st.divider()
-        st.info(f"Selected Topic: **{selected_node_id}**")
+        st.subheader(f"Selected: {selected_node_id}")
 
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            if st.button("🧪 このテーマを構造分解する", use_container_width=True):
-                # UIのタブをチャットに切り替えるトリガー（ui.py側で制御が必要だが、ここではsession_stateにセット）
-                # ui.py handles navigation based on sidebar inputs usually.
-                # Since we are inside the dashboard component, we might need a way to signal navigation.
-                # Assuming simple instruction for now as per plan.
+        if selected_node:
+            cols = st.columns(2)
+            with cols[0]:
+                st.markdown(f"**Type:** {selected_node.get('type', 'Unknown')}")
+                st.markdown(f"**Label:** {selected_node.get('label', '-')}")
+            with cols[1]:
+                # 確信度などがAPIから返ってくる場合
+                if "confidence" in selected_node:
+                    st.markdown(f"**Confidence:** {selected_node['confidence']:.2f}")
+                if "source" in selected_node:
+                    st.markdown(f"**Source:** {selected_node['source']}")
 
-                # Copy to clipboard or set internal state for Chat input
+            # 関連ドキュメントなどがAPIに含まれていれば表示
+            if "documents" in selected_node:
+                st.write("**Related Documents:**")
+                for doc in selected_node["documents"]:
+                    st.write(f"- {doc}")
+
+            # アクションボタン
+            if st.button("🧪 このテーマを構造分解する", key=f"btn_{selected_node_id}", use_container_width=True):
                 st.session_state["prefill_message"] = f"「{selected_node_id}」について構造分解して、イノベーションの機会を探してください。"
                 st.success(f"『{selected_node_id}』の分析準備が整いました。チャット画面へ移動して送信してください。")
+
+        else:
+            st.warning("ノードの詳細情報が見つかりません。")
 
 def render_innovation_history_tab():
     history = fetch_innovation_history(st.session_state["user_id"])
@@ -207,7 +249,7 @@ def show_dashboard():
     tab1, tab2 = st.tabs(["🔭 Knowledge Explorer", "🧬 Innovation History"])
 
     with tab1:
-        render_knowledge_explorer()
+        render_graph_view()
 
     with tab2:
         render_innovation_history_tab()
