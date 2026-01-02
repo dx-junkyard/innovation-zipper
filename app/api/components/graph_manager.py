@@ -233,9 +233,9 @@ class GraphManager:
 
         MATCH (center)-[r]-(neighbor)
         RETURN
-            {{id: center.name, label: center.name, labels: labels(center)}} as center_node,
+            {{id: center.name, label: center.name, labels: labels(center), properties: properties(center)}} as center_node,
             {{source: startNode(r).name, target: endNode(r).name, label: type(r)}} as edge_data,
-            {{id: neighbor.name, label: neighbor.name, labels: labels(neighbor)}} as neighbor_node
+            {{id: neighbor.name, label: neighbor.name, labels: labels(neighbor), properties: properties(neighbor)}} as neighbor_node
         LIMIT 50
         """
 

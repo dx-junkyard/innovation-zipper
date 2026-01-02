@@ -209,14 +209,15 @@ async def get_graph_neighbors(user_id: str = Query(..., description="User ID"), 
         elif "Keyword" in lbls: node_type = "Keyword"
         elif "Document" in lbls: node_type = "Document"
 
-        nodes.append({
+        # プロパティをマージしてフロントエンドに渡す
+        node_data = {
             "id": n["id"],
             "label": n["label"],
             "type": node_type,
-            # sizeやcolorはUI側で状態に応じて決定するため、ここでは最低限でOK
-            # ただし、UI側で使いやすいようにラベル情報も渡しておく
-            "labels": lbls
-        })
+            "labels": lbls,
+            "properties": n.get("properties", {})  # 本文やメタデータを含む
+        }
+        nodes.append(node_data)
 
     return {"nodes": nodes, "edges": data["edges"]}
 
