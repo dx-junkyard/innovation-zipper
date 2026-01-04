@@ -155,13 +155,14 @@ def run_workflow_task(user_id: str, message: str, user_message_id: Optional[str]
 
 
 @celery_app.task(name="process_document_task")
-def process_document_task(user_id: str, file_path: str, title: str, file_id: str):
+def process_document_task(user_id: str, file_path: str, title: str, file_id: str, db_file_id: Optional[int] = None):
     """
     Background task to process uploaded documents (PDF).
     """
     try:
         logger.info(f"Starting process_document_task for {file_path}")
         km = KnowledgeManager()
+        repo = DBClient()
 
         if not os.path.exists(file_path):
             logger.error(f"File not found: {file_path}")
@@ -228,6 +229,7 @@ def process_document_task(user_id: str, file_path: str, title: str, file_id: str
         # ドキュメントから検出された全ての文脈を興味グラフに反映する
         if detected_categories:
             try:
+                # 1. Update Graph
                 for cat in detected_categories:
                     km.graph_manager.add_category_and_keywords(
                         user_id=user_id,
@@ -237,8 +239,15 @@ def process_document_task(user_id: str, file_path: str, title: str, file_id: str
                         source_type="document_analysis"
                     )
                 logger.info(f"Updated Interest Graph with {len(detected_categories)} categories.")
+
+                # 2. Update File Categories in MySQL
+                if db_file_id:
+                    category_names = [c["name"] for c in detected_categories]
+                    repo.update_file_category(db_file_id, category_names, is_verified=False)
+                    logger.info(f"Updated MySQL user_files categories for file {db_file_id}: {category_names}")
+
             except Exception as e:
-                logger.error(f"Failed to update Interest Graph: {e}")
+                logger.error(f"Failed to update Interest Graph or DB: {e}")
 
         # ---------------------------------------------------------
         # Chunking & Saving (Existing Logic with updates)
