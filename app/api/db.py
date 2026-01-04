@@ -472,3 +472,81 @@ class DBClient:
                 cursor.close()
             if conn:
                 conn.close()
+
+    def update_file_category(self, file_id: int, category: str, is_verified: bool = True) -> bool:
+        conn = None
+        cursor = None
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor()
+            query = "UPDATE user_files SET category = %s, is_verified = %s WHERE id = %s"
+            cursor.execute(query, (category, is_verified, file_id))
+            conn.commit()
+            return True
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in update_file_category: {err}")
+            return False
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
+    def update_capture_category(self, capture_id: int, category: str, is_verified: bool = True) -> bool:
+        conn = None
+        cursor = None
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor()
+            query = "UPDATE captured_pages SET category = %s, is_verified = %s WHERE id = %s"
+            cursor.execute(query, (category, is_verified, capture_id))
+            conn.commit()
+            return True
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in update_capture_category: {err}")
+            return False
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
+    def get_all_user_contents(self, user_id: str) -> List[Dict[str, Any]]:
+        conn = None
+        cursor = None
+        contents = []
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor(dictionary=True)
+
+            # 1. Files
+            query_files = """
+                SELECT id, title, category, is_verified, created_at, 'file' as type, file_name as source
+                FROM user_files
+                WHERE user_id = %s
+            """
+            cursor.execute(query_files, (user_id,))
+            files = cursor.fetchall()
+            contents.extend(files)
+
+            # 2. Captured Pages
+            query_captures = """
+                SELECT id, title, category, is_verified, created_at, 'capture' as type, url as source
+                FROM captured_pages
+                WHERE user_id = %s
+            """
+            cursor.execute(query_captures, (user_id,))
+            captures = cursor.fetchall()
+            contents.extend(captures)
+
+            # Sort by created_at DESC
+            contents.sort(key=lambda x: x['created_at'], reverse=True)
+
+            # Format datetime
+            for item in contents:
+                if item.get('created_at'):
+                    item['created_at'] = item['created_at'].isoformat()
+
+            return contents
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in get_all_user_contents: {err}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()

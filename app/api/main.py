@@ -17,6 +17,7 @@ from app.api.workflow import WorkflowManager
 from app.api.state_manager import StateManager
 from app.api.components.knowledge_manager import KnowledgeManager
 from app.api.components.graph_manager import GraphManager
+from app.api.components.topic_client import TopicClient
 from app.tasks.analysis import run_workflow_task, process_capture_task, process_document_task
 from pydantic import BaseModel, Field, HttpUrl
 import requests
@@ -455,6 +456,90 @@ async def upload_user_file(
         "message": "File uploaded and processing started."
     }
 
+
+class ContentFeedbackRequest(BaseModel):
+    user_id: str
+    content_id: int
+    content_type: str # 'file' or 'capture'
+    new_category: str
+    text_to_learn: Optional[str] = None # Text content to use for learning
+
+class ConversationFeedbackRequest(BaseModel):
+    user_id: str
+    new_category: str
+    summary_to_learn: Optional[str] = None
+
+@app.post("/api/v1/feedback/content")
+async def feedback_content(request: ContentFeedbackRequest):
+    repo = DBClient()
+    topic_client = TopicClient()
+    graph_manager = GraphManager()
+
+    # 1. Update Database
+    if request.content_type == 'file':
+        success = repo.update_file_category(request.content_id, request.new_category, is_verified=True)
+    elif request.content_type == 'capture':
+        success = repo.update_capture_category(request.content_id, request.new_category, is_verified=True)
+    else:
+        raise HTTPException(status_code=400, detail="Invalid content_type")
+
+    if not success:
+        raise HTTPException(status_code=500, detail="Database update failed")
+
+    # 2. Learn in Topic Service
+    if request.text_to_learn:
+        # Truncate text if too long (e.g., 500 chars)
+        text_snippet = request.text_to_learn[:500]
+        topic_client.learn_text(text_snippet, request.new_category)
+
+    # 3. Update Knowledge Graph
+    graph_manager.add_user_interest(
+        user_id=request.user_id,
+        concept_name=request.new_category,
+        confidence=1.0,
+        source_type=graph_manager.SOURCE_USER_STATED
+    )
+
+    return {"status": "success", "message": "Content updated and learned."}
+
+
+@app.post("/api/v1/feedback/conversation")
+async def feedback_conversation(request: ConversationFeedbackRequest):
+    repo = DBClient()
+    topic_client = TopicClient()
+    graph_manager = GraphManager()
+
+    # 1. Update User State (Interest Profile)
+    state = repo.get_user_state(request.user_id)
+    if state:
+        interest_profile = state.get("interest_profile") or {}
+
+        # Update
+        interest_profile["current_category"] = request.new_category
+
+        repo.upsert_user_state(request.user_id, interest_profile, state.get("active_hypotheses") or {})
+
+        # 2. Learn
+        if request.summary_to_learn:
+             topic_client.learn_text(request.summary_to_learn, request.new_category)
+
+        # 3. Update Graph
+        graph_manager.add_user_interest(
+            request.user_id,
+            request.new_category,
+            confidence=1.0,
+            source_type=graph_manager.SOURCE_USER_STATED
+        )
+
+        return {"status": "success", "message": "Conversation context updated."}
+
+    raise HTTPException(status_code=404, detail="User state not found")
+
+@app.get("/api/v1/user-contents")
+async def get_user_contents(user_id: str = Query(..., description="User ID")):
+    repo = DBClient()
+    contents = repo.get_all_user_contents(user_id)
+    return {"contents": contents}
 
 if __name__ == "__main__":
     import uvicorn

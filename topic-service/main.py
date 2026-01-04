@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 # 定数
 CATEGORIES_FILE = "categories.json"
+USER_EXAMPLES_FILE = "user_examples.json"
 EMBEDDING_MODEL = "text-embedding-3-small"
 SIMILARITY_THRESHOLD = 0.35  # しきい値
 
@@ -77,6 +78,25 @@ class KnowledgeBase:
                         "text": ex
                     })
 
+        # 3. ユーザーフィードバック (User Examples)
+        if os.path.exists(USER_EXAMPLES_FILE):
+            try:
+                with open(USER_EXAMPLES_FILE, "r", encoding="utf-8") as f:
+                    user_examples = json.load(f)
+                    for item in user_examples:
+                        text = item.get("text", "")
+                        cat = item.get("category", "")
+                        if text and cat:
+                            texts_to_embed.append(text)
+                            self.metadata.append({
+                                "category": None, # Parent unknown for user examples unless stored
+                                "subcategory": cat, # Treat as the target category
+                                "type": "user_feedback",
+                                "text": text
+                            })
+            except Exception as e:
+                logger.error(f"Failed to load user examples: {e}")
+
         if not texts_to_embed:
             logger.warning("No texts found to embed.")
             return
@@ -88,6 +108,44 @@ class KnowledgeBase:
             logger.info(f"Indexed {len(self.vectors)} items successfully.")
         except Exception as e:
             logger.error(f"Failed to create embeddings: {e}")
+
+    def add_example(self, text: str, category: str):
+        """ユーザーフィードバックを追加し、インデックスを更新する"""
+        # 1. ファイルに追記
+        examples = []
+        if os.path.exists(USER_EXAMPLES_FILE):
+            try:
+                with open(USER_EXAMPLES_FILE, "r", encoding="utf-8") as f:
+                    examples = json.load(f)
+            except:
+                pass
+
+        examples.append({"text": text, "category": category})
+
+        with open(USER_EXAMPLES_FILE, "w", encoding="utf-8") as f:
+            json.dump(examples, f, ensure_ascii=False, indent=2)
+
+        # 2. メモリ上のインデックスに追加
+        try:
+            vector = self.embedder.embed_query(text)
+            new_vec = np.array(vector).reshape(1, -1)
+
+            if self.vectors is None:
+                self.vectors = new_vec
+            else:
+                self.vectors = np.vstack([self.vectors, new_vec])
+
+            self.metadata.append({
+                "category": None,
+                "subcategory": category,
+                "type": "user_feedback",
+                "text": text
+            })
+            logger.info(f"Learned new example for category '{category}'")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to add example: {e}")
+            return False
 
     def search(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         if self.vectors is None or len(self.vectors) == 0:
@@ -171,3 +229,18 @@ def predict(payload: PredictRequest):
 @app.post("/train")
 def train():
     return {"status": "ignored", "message": "Training is not needed for semantic search."}
+
+class FeedbackRequest(BaseModel):
+    text: str
+    category: str
+
+@app.post("/feedback")
+def feedback(payload: FeedbackRequest):
+    if not payload.text.strip() or not payload.category.strip():
+        raise HTTPException(status_code=400, detail="Text and category are required.")
+
+    success = kb.add_example(payload.text, payload.category)
+    if success:
+        return {"status": "success", "message": f"Learned category '{payload.category}'."}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to learn example.")

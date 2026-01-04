@@ -59,3 +59,23 @@ class TopicClient:
     def train_model(self, texts: list):
         # Implementation for background training...
         pass
+
+    def learn_text(self, text: str, category: str) -> bool:
+        """
+        Sends feedback to the topic service to learn a new text-category pair.
+        """
+        try:
+            resp = requests.post(
+                f"{self.api_url}/feedback",
+                json={"text": text, "category": category},
+                timeout=5.0
+            )
+            if resp.status_code == 200:
+                logger.info(f"[TopicClient] Successfully learned: '{category}'")
+                return True
+            else:
+                logger.warning(f"[TopicClient] Feedback failed: {resp.status_code} - {resp.text}")
+                return False
+        except Exception as e:
+            logger.warning(f"[TopicClient] Feedback call failed: {e}")
+            return False

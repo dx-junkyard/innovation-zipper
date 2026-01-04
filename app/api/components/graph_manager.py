@@ -93,6 +93,20 @@ class GraphManager:
         except Exception as e:
             print(f"Error adding interest edge: {e}")
 
+    def delete_user_interest(self, user_id: str, concept_name: str):
+        """Removes the INTERESTED_IN relationship between User and Concept."""
+        if not self.driver: return
+
+        query = f"""
+        MATCH (u:{self.LABEL_USER} {{id: $user_id}})-[r:{self.REL_INTERESTED_IN}]->(c:{self.LABEL_CONCEPT} {{name: $name}})
+        DELETE r
+        """
+        try:
+            with self.driver.session() as session:
+                session.run(query, user_id=user_id, name=concept_name)
+        except Exception as e:
+            print(f"Error deleting user interest: {e}")
+
     def add_category_and_keywords(self, user_id: str, category_name: str, confidence: float, keywords: List[str], source_type: str = "ai_inferred"):
         """
         Adds a category and its keywords to the user's interest graph.

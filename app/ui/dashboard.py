@@ -53,6 +53,93 @@ def fetch_neighbors(user_id, node_id):
         st.error(f"隣接データ取得エラー: {e}")
         return {"nodes": [], "edges": []}
 
+def fetch_all_user_contents(user_id):
+    """APIからユーザーの全コンテンツ（ファイル、Webクリップ）を取得"""
+    try:
+        base_url = get_base_url()
+        target_url = f"{base_url}/user-contents"
+
+        resp = requests.get(target_url, params={"user_id": user_id})
+        resp.raise_for_status()
+        return resp.json().get("contents", [])
+    except Exception as e:
+        st.error(f"コンテンツ取得エラー: {e}")
+        return []
+
+def send_content_feedback(user_id, content_id, content_type, new_category, text_to_learn=None):
+    """コンテンツのカテゴリフィードバックを送信"""
+    try:
+        base_url = get_base_url()
+        target_url = f"{base_url}/feedback/content"
+
+        payload = {
+            "user_id": user_id,
+            "content_id": content_id,
+            "content_type": content_type,
+            "new_category": new_category,
+            "text_to_learn": text_to_learn
+        }
+        resp = requests.post(target_url, json=payload)
+        resp.raise_for_status()
+        return True
+    except Exception as e:
+        st.error(f"フィードバック送信エラー: {e}")
+        return False
+
+def render_data_management_tab():
+    st.subheader("🗃️ Knowledge Gardening (データ管理・育成)")
+    user_id = st.session_state.get("user_id")
+
+    # リロードボタン
+    if st.button("🔄 データを更新"):
+        st.rerun()
+
+    contents = fetch_all_user_contents(user_id)
+
+    if not contents:
+        st.info("まだ登録されたコンテンツがありません。")
+        return
+
+    # Header
+    cols = st.columns([3, 2, 2, 2])
+    cols[0].markdown("**タイトル / ソース**")
+    cols[1].markdown("**現在のカテゴリ**")
+    cols[2].markdown("**修正**")
+    cols[3].markdown("**アクション**")
+
+    for idx, item in enumerate(contents):
+        with st.container():
+            cols = st.columns([3, 2, 2, 2])
+
+            # 1. Title & Source
+            icon = "📄" if item['type'] == 'file' else "🌐"
+            source_display = item['source']
+            if len(source_display) > 30:
+                source_display = source_display[:27] + "..."
+
+            cols[0].markdown(f"{icon} **{item['title']}**\n\n<span style='color:gray; font-size:0.8em'>{source_display}</span>", unsafe_allow_html=True)
+
+            # 2. Current Category
+            is_verified = item.get("is_verified", False)
+            status_icon = "✅" if is_verified else "❓"
+            cols[1].markdown(f"{status_icon} {item.get('category', 'Uncategorized')}")
+
+            # 3. Modification
+            new_cat = cols[2].text_input("新しいカテゴリ", value=item.get('category', ''), key=f"cat_{item['id']}_{item['type']}")
+
+            # 4. Action
+            if cols[3].button("学習・更新", key=f"btn_{item['id']}_{item['type']}"):
+                if new_cat and new_cat != item.get('category'):
+                    text_to_learn = f"{item['title']} {item['source']}"
+
+                    if send_content_feedback(user_id, item['id'], item['type'], new_cat, text_to_learn):
+                        st.success(f"更新しました: {new_cat}")
+                        st.rerun()
+                else:
+                    st.warning("カテゴリを変更してください。")
+
+            st.divider()
+
 def render_innovation_zipper(analysis_data):
     """構造分解データをGraphvizでジッパー状に可視化"""
 
@@ -276,10 +363,13 @@ def show_dashboard():
         st.warning("ログインしてください")
         return
 
-    tab1, tab2 = st.tabs(["🔭 Knowledge Explorer", "🧬 Innovation History"])
+    tab1, tab2, tab3 = st.tabs(["🔭 Knowledge Explorer", "🧬 Innovation History", "🗃️ Data Management"])
 
     with tab1:
         render_graph_view()
 
     with tab2:
         render_innovation_history_tab()
+
+    with tab3:
+        render_data_management_tab()

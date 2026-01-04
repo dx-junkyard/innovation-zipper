@@ -5,6 +5,8 @@ CREATE TABLE IF NOT EXISTS captured_pages (
     title TEXT,
     content MEDIUMTEXT,
     screenshot_url TEXT,
+    category VARCHAR(100) DEFAULT 'Uncategorized',
+    is_verified BOOLEAN DEFAULT FALSE,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     KEY idx_captured_pages_user (user_id, created_at),
