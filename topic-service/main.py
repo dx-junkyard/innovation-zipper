@@ -1,213 +1,173 @@
 import os
-import logging
 import json
+import logging
 import numpy as np
 from typing import List, Dict, Any
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from bertopic import BERTopic
-from bertopic.vectorizers import ClassTfidfTransformer
-from bertopic.representation import MaximalMarginalRelevance
-from sklearn.feature_extraction.text import CountVectorizer
-from umap import UMAP
-from hdbscan import HDBSCAN
-import MeCab
-import ipadic
-import spacy
+from langchain_openai import OpenAIEmbeddings
+from sklearn.metrics.pairwise import cosine_similarity
 
+# ロギング設定
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="BERTopic API Service")
+# 定数
+CATEGORIES_FILE = "categories.json"
+EMBEDDING_MODEL = "text-embedding-3-small"
+SIMILARITY_THRESHOLD = 0.35  # しきい値
 
-MODEL_PATH = "/app/models/my_bertopic_model"
-SEED_DATA_PATH = "seed_data.json"
-ZERO_SHOT_TOPICS = [
-    "政治_行政_法律_政策",
-    "経済_金融_ビジネス_産業",
-    "国際_社会問題_平和_人権",
-    "労働_働き方_キャリア",
-    "自然_環境_宇宙_気候",
-    "科学_数学_物理_生命",
-    "IT_テクノロジー_AI_情報",
-    "工学_製造_建築_インフラ",
-    "医療_健康_身体_ヘルスケア",
-    "心理_メンタル_精神_哲学",
-    "歴史_文化_言語_人類学",
-    "芸術_アート_デザイン_表現",
-    "エンタメ_サブカル_娯楽",
-    "生活_家事_住まい_育児",
-    "料理_グルメ_食文化",
-    "趣味_旅行_レジャー_活動",
-    "教育_学習_自己啓発",
-    "人間関係_家族_恋愛_対話"
-]
-
-class JapaneseTokenizer:
+class KnowledgeBase:
     def __init__(self):
-        self._init_tagger()
+        self.vectors = None
+        self.metadata = []
+        # APIキーは環境変数 OPENAI_API_KEY から自動読込
+        self.embedder = OpenAIEmbeddings(model=EMBEDDING_MODEL)
 
-    def _init_tagger(self):
-        self.tagger = MeCab.Tagger(ipadic.MECAB_ARGS)
+    def load_and_index(self):
+        """categories.jsonを読み込みベクトルインデックスを構築する"""
+        if not os.path.exists(CATEGORIES_FILE):
+            logger.error(f"{CATEGORIES_FILE} not found!")
+            return
 
-    def __call__(self, text):
-        if not hasattr(self, "tagger") or self.tagger is None:
-            self._init_tagger()
+        with open(CATEGORIES_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
 
-        node = self.tagger.parseToNode(text)
-        words = []
-        while node:
-            if node.surface:
-                words.append(node.surface)
-            node = node.next
-        return words
+        texts_to_embed = []
+        self.metadata = []
 
-    def __getstate__(self):
-        state = self.__dict__.copy()
-        if "tagger" in state:
-            del state["tagger"]
-        return state
+        logger.info("Building vector index from categories...")
 
-    def __setstate__(self, state):
-        self.__dict__.update(state)
-        self._init_tagger()
+        for main_cat, main_val in data.items():
+            # 大カテゴリ自体の定義も登録
+            desc = main_val.get("description", "")
+            if desc:
+                text = f"{main_cat}: {desc}"
+                texts_to_embed.append(text)
+                self.metadata.append({
+                    "category": main_cat,
+                    "subcategory": None,
+                    "type": "description",
+                    "text": text
+                })
 
-class TopicModelManager:
-    def __init__(self):
-        self.model = None
-        self.tokenizer = JapaneseTokenizer()
+            for sub in main_val.get("subcategories", []):
+                sub_name = sub["category"]
+                sub_desc = sub["description"]
+                examples = sub.get("examples", [])
+
+                # 1. サブカテゴリの説明文
+                desc_text = f"{sub_name}: {sub_desc}"
+                texts_to_embed.append(desc_text)
+                self.metadata.append({
+                    "category": main_cat,
+                    "subcategory": sub_name,
+                    "type": "description",
+                    "text": desc_text
+                })
+
+                # 2. 例文 (Examples)
+                for ex in examples:
+                    texts_to_embed.append(ex)
+                    self.metadata.append({
+                        "category": main_cat,
+                        "subcategory": sub_name,
+                        "type": "example",
+                        "text": ex
+                    })
+
+        if not texts_to_embed:
+            logger.warning("No texts found to embed.")
+            return
+
+        # 一括ベクトル化
         try:
-            nlp = spacy.load("ja_core_news_sm")
-            self.stop_words = list(nlp.Defaults.stop_words)
-        except:
-            self.stop_words = []
+            embeddings = self.embedder.embed_documents(texts_to_embed)
+            self.vectors = np.array(embeddings)
+            logger.info(f"Indexed {len(self.vectors)} items successfully.")
+        except Exception as e:
+            logger.error(f"Failed to create embeddings: {e}")
 
-    def _build_pipeline(self):
-        return {
-            "embedding_model": "paraphrase-multilingual-MiniLM-L12-v2",
-            "umap_model": UMAP(n_components=5, n_neighbors=15, metric='cosine', min_dist=0.0, random_state=42),
-            "hdbscan_model": HDBSCAN(min_samples=10, metric='euclidean', cluster_selection_method='eom', prediction_data=True, min_cluster_size=10),
-            "vectorizer_model": CountVectorizer(tokenizer=self.tokenizer, ngram_range=(1, 2), max_df=0.95, stop_words=self.stop_words),
-            "ctfidf_model": ClassTfidfTransformer(reduce_frequent_words=True),
-            "representation_model": MaximalMarginalRelevance(diversity=0.7),
-            "zeroshot_topic_list": ZERO_SHOT_TOPICS,
-            "zeroshot_min_similarity": 0.6,
-            "language": "japanese",
-            "calculate_probabilities": True
-        }
+    def search(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        if self.vectors is None or len(self.vectors) == 0:
+            return []
 
-    def initialize(self):
-        if os.path.exists(MODEL_PATH):
-            try:
-                self.model = BERTopic.load(MODEL_PATH)
-                logger.info("Loaded existing model.")
-                return
-            except Exception as e:
-                logger.error(f"Load failed: {e}")
+        try:
+            # クエリのベクトル化
+            query_vec = np.array(self.embedder.embed_query(query)).reshape(1, -1)
 
-        if not os.path.exists(SEED_DATA_PATH):
-            logger.info("Seed data not found. Generating default seed data...")
-            from seed_generator import generate_seed_data
-            try:
-                generate_seed_data(output_path=SEED_DATA_PATH)
-            except Exception as e:
-                logger.error(f"Failed to generate seed data: {e}")
-                return
+            # コサイン類似度計算
+            scores = cosine_similarity(query_vec, self.vectors)[0]
 
-        logger.info("Initializing with seed data...")
-        if os.path.exists(SEED_DATA_PATH):
-            with open(SEED_DATA_PATH, "r", encoding="utf-8") as f:
-                docs = json.load(f)
-            self.model = BERTopic(**self._build_pipeline())
-            self.model.fit_transform(docs)
-            os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
-            self.model.save(MODEL_PATH)
-            logger.info(f"Model trained on {len(docs)} seeds and saved.")
+            # 上位候補の取得
+            top_indices = np.argsort(scores)[::-1][:top_k]
 
-manager = TopicModelManager()
+            results = []
+            seen_categories = set()
 
-@app.on_event("startup")
-def on_startup():
-    manager.initialize()
+            for idx in top_indices:
+                score = float(scores[idx])
+                if score < SIMILARITY_THRESHOLD:
+                    continue
+
+                meta = self.metadata[idx]
+                # 決定されたカテゴリ名 (サブカテゴリがあればそれ、なければ大カテゴリ)
+                cat_name = meta["subcategory"] if meta["subcategory"] else meta["category"]
+
+                # 重複排除（同じカテゴリで説明文と例文が両方ヒットした場合など）
+                if cat_name in seen_categories:
+                    continue
+
+                seen_categories.add(cat_name)
+
+                results.append({
+                    "name": cat_name,
+                    "confidence": round(score, 3),
+                    "keywords": [], # 互換性のため空リスト
+                    "parent_category": meta["category"],
+                    "match_type": meta["type"],
+                    "matched_text": meta["text"][:50] + "..." # デバッグ用
+                })
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Search failed: {e}")
+            return []
+
+# グローバルインスタンス
+kb = KnowledgeBase()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 起動時の処理
+    kb.load_and_index()
+    yield
+    # 終了時の処理 (必要なら)
+
+app = FastAPI(title="Semantic Topic Classifier", lifespan=lifespan)
 
 class PredictRequest(BaseModel):
     text: str
-class TrainRequest(BaseModel):
-    texts: List[str]
-    use_seed_data: bool = True
 
 @app.post("/predict")
 def predict(payload: PredictRequest):
-    if not manager.model:
+    if not payload.text.strip():
         return {"categories": []}
 
-    topics, probs = manager.model.transform([payload.text])
+    results = kb.search(payload.text)
 
-    # Check if probs is available and has the expected shape
-    if probs is None or len(probs) == 0:
-        return {"categories": []}
+    # ログ出力（デバッグ用）
+    if results:
+        top = results[0]
+        logger.info(f"Input: {payload.text[:30]}... -> {top['name']} ({top['confidence']}) via {top['match_type']}")
+    else:
+        logger.info(f"Input: {payload.text[:30]}... -> No Match")
 
-    topic_probs = probs[0]
-    categories = []
+    return {"categories": results}
 
-    if isinstance(topic_probs, (np.ndarray, list)):
-        # Get indices sorted by probability descending
-        sorted_indices = np.argsort(topic_probs)[::-1]
-
-        for idx in sorted_indices:
-            score = float(topic_probs[idx])
-
-            # Threshold check
-            if score < 0.1:
-                break # Since sorted, next ones will be lower
-
-            if len(categories) >= 3:
-                break
-
-            topic_id = int(idx)
-
-            # Fetch Topic Info
-            try:
-                info = manager.model.get_topic_info(topic_id)
-            except:
-                continue
-
-            if info.empty:
-                continue
-
-            label = "Unknown"
-            if "CustomName" in info.columns and info["CustomName"].values[0]:
-                label = info["CustomName"].values[0]
-            elif "Name" in info.columns:
-                name_val = info["Name"].values[0]
-                parts = name_val.split("_")
-                if len(parts) > 2:
-                    label = "_".join(parts[1:3])
-                else:
-                    label = name_val
-
-            # Fetch Keywords
-            raw_keywords = manager.model.get_topic(topic_id)
-            keywords = []
-            if raw_keywords:
-                # Top 3 words
-                keywords = [word for word, score in raw_keywords[:3]]
-
-            categories.append({
-                "name": label,
-                "confidence": score,
-                "keywords": keywords
-            })
-
-    return {"categories": categories}
-
+# 後方互換性・学習用エンドポイント（ダミー）
 @app.post("/train")
-def train(payload: TrainRequest):
-    docs = payload.texts
-    if payload.use_seed_data and os.path.exists(SEED_DATA_PATH):
-        with open(SEED_DATA_PATH, "r") as f: docs.extend(json.load(f))
-    if len(docs) < 50: raise HTTPException(400, "Not enough data")
-    manager.model = BERTopic(**manager._build_pipeline())
-    manager.model.fit_transform(docs)
-    manager.model.save(MODEL_PATH)
-    return {"status": "success"}
+def train():
+    return {"status": "ignored", "message": "Training is not needed for semantic search."}
