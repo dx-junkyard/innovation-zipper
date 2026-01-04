@@ -179,21 +179,70 @@ def process_document_task(user_id: str, file_path: str, title: str, file_id: str
         if not text_content.strip():
              return {"status": "error", "message": "No text content extracted"}
 
-        # Infer category using TopicClient
-        try:
-            topic_client = TopicClient()
-            # Use first 1000 chars for prediction
-            # Note: Logging handled inside TopicClient
-            predicted_category = topic_client.predict_category(text_content[:1000])
-        except Exception as e:
-            logger.warning(f"Topic prediction failed for document: {e}")
-            predicted_category = None
+        # ---------------------------------------------------------
+        # [New Logic] Iterative Category Detection
+        # ---------------------------------------------------------
+        topic_client = TopicClient()
+        detected_categories = []
 
-        final_category = predicted_category if predicted_category else "Uncategorized"
+        # 判定用パラメータ
+        chunk_size_detect = 1500
+        overlap_detect = 500
+        max_chunks_to_check = 5
+        confidence_threshold = 0.40 # しきい値
 
-        # [LOG] 最終的なカテゴリの記録
-        logger.info(f"Document '{title}' categorized as: {final_category}")
+        for i in range(max_chunks_to_check):
+            start = i * (chunk_size_detect - overlap_detect)
+            end = start + chunk_size_detect
+            if start >= len(text_content):
+                break
 
+            chunk_text = text_content[start:end]
+            if not chunk_text.strip():
+                continue
+
+            logger.info(f"Analyzing chunk {i+1} for document categorization...")
+
+            # リストで結果を取得 (analyze_contentを使用)
+            result = topic_client.analyze_content(chunk_text)
+            candidates = result.get("categories", [])
+
+            # しきい値を超える有効なカテゴリがあるかフィルタリング
+            valid_candidates = [c for c in candidates if c.get("confidence", 0) >= confidence_threshold]
+
+            if valid_candidates:
+                detected_categories = valid_candidates
+                logger.info(f"Categories detected in chunk {i+1}: {[c['name'] for c in valid_candidates]}")
+                break # 有効な判定が出たら終了
+
+        # 結果の決定
+        if detected_categories:
+            primary_category = detected_categories[0]["name"]
+        else:
+            primary_category = "Uncategorized"
+            logger.warning(f"No reliable categories found for document: {title}")
+
+        # ---------------------------------------------------------
+        # [New Logic] Graph Update for All Categories
+        # ---------------------------------------------------------
+        # ドキュメントから検出された全ての文脈を興味グラフに反映する
+        if detected_categories:
+            try:
+                for cat in detected_categories:
+                    km.graph_manager.add_category_and_keywords(
+                        user_id=user_id,
+                        category_name=cat["name"],
+                        confidence=cat.get("confidence", 0.5),
+                        keywords=[], # Semantic Searchではキーワードは空でもOK
+                        source_type="document_analysis"
+                    )
+                logger.info(f"Updated Interest Graph with {len(detected_categories)} categories.")
+            except Exception as e:
+                logger.error(f"Failed to update Interest Graph: {e}")
+
+        # ---------------------------------------------------------
+        # Chunking & Saving (Existing Logic with updates)
+        # ---------------------------------------------------------
         # Chunking & Saving
         chunk_size = 1000
         overlap = 100
@@ -207,14 +256,15 @@ def process_document_task(user_id: str, file_path: str, title: str, file_id: str
                 "file_id": file_id,
                 "title": title,
                 "chunk_index": i,
-                "source": "uploaded_file"
+                "source": "uploaded_file",
+                "all_categories": [c["name"] for c in detected_categories] # メタデータにも全カテゴリを残す
             }
 
             if km.add_user_memory(
                 user_id=user_id,
                 content=chunk,
                 memory_type="document_chunk",
-                category=final_category,
+                category=primary_category,
                 meta=meta
             ):
                 success_count += 1
