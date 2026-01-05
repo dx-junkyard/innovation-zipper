@@ -156,6 +156,21 @@ class GraphManager:
         except Exception as e:
             print(f"Error adding hypothesis: {e}")
 
+    def add_document(self, text: str, evidence_ids: List[str] = None, properties: Dict[str, Any] = None):
+        """Adds a Document node."""
+        if not self.driver: return
+        query = f"""
+        MERGE (d:{self.LABEL_DOCUMENT} {{text: $text}})
+        SET d.evidence = $evidence
+        SET d += $props
+        RETURN d
+        """
+        try:
+            with self.driver.session() as session:
+                session.run(query, text=text, evidence=evidence_ids or [], props=properties or {})
+        except Exception as e:
+            print(f"Error adding document: {e}")
+
     def link_hypothesis_to_concept(self, hypothesis_text: str, concept_name: str, rel_type: str = "IMPLIES"):
         """Links a Hypothesis to a Concept (or vice versa depending on logic, here we assume Hypothesis IMPLIES Concept or relates to it)."""
         if not self.driver: return
@@ -172,6 +187,22 @@ class GraphManager:
                 session.run(query, h_text=hypothesis_text, c_name=concept_name)
         except Exception as e:
             print(f"Error linking hypothesis to concept: {e}")
+
+    def link_document_to_concept(self, document_text: str, concept_name: str, rel_type: str = "MENTIONED_IN"):
+        """Links a Document to a Concept."""
+        if not self.driver: return
+
+        query = f"""
+        MATCH (d:{self.LABEL_DOCUMENT} {{text: $d_text}})
+        MATCH (c:{self.LABEL_CONCEPT} {{name: $c_name}})
+        MERGE (d)-[r:{rel_type}]->(c)
+        RETURN r
+        """
+        try:
+            with self.driver.session() as session:
+                session.run(query, d_text=document_text, c_name=concept_name)
+        except Exception as e:
+            print(f"Error linking document to concept: {e}")
 
     def get_user_interests(self, user_id: str) -> List[Dict[str, Any]]:
         """Retrieves concepts the user is interested in."""
@@ -247,9 +278,9 @@ class GraphManager:
 
         MATCH (center)-[r]-(neighbor)
         RETURN
-            {{id: center.name, label: center.name, labels: labels(center), properties: properties(center)}} as center_node,
-            {{source: startNode(r).name, target: endNode(r).name, label: type(r)}} as edge_data,
-            {{id: neighbor.name, label: neighbor.name, labels: labels(neighbor), properties: properties(neighbor)}} as neighbor_node
+            {{id: coalesce(center.name, center.text, toString(id(center))), label: coalesce(center.name, center.text, "No Label"), labels: labels(center), properties: properties(center)}} as center_node,
+            {{source: coalesce(startNode(r).name, startNode(r).text, toString(id(startNode(r)))), target: coalesce(endNode(r).name, endNode(r).text, toString(id(endNode(r)))), label: type(r)}} as edge_data,
+            {{id: coalesce(neighbor.name, neighbor.text, toString(id(neighbor))), label: coalesce(neighbor.name, neighbor.text, "No Label"), labels: labels(neighbor), properties: properties(neighbor)}} as neighbor_node
         LIMIT 50
         """
 

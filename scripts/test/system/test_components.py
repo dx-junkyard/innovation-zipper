@@ -12,8 +12,8 @@ class TestComponents(unittest.TestCase):
         self.context = StateManager.init_conversation_context(
             user_message="子供の医療費について知りたい",
             dialog_history=[],
-            resident_profile={},
-            service_needs={}
+            interest_profile={},
+            active_hypotheses={}
         )
 
     def test_situation_analyzer(self):

@@ -122,15 +122,15 @@ class KnowledgeManager:
                     self.graph_manager.add_hypothesis(text=content, evidence_ids=[entry_id], properties=meta)
                     self.graph_manager.link_hypothesis_to_concept(content, category)
 
-                # If memory is a document chunk, also add it as hypothesis node for now to ensure visibility in graph
+                # If memory is a document chunk, add it as a Document node
                 elif memory_type == "document_chunk":
-                    # We treat document chunks as hypotheses/claims from a file source
-                    self.graph_manager.add_hypothesis(text=content, evidence_ids=[entry_id], properties=meta)
+                    # We treat document chunks as Document nodes from a file source
+                    self.graph_manager.add_document(text=content, evidence_ids=[entry_id], properties=meta)
 
                     # ★修正: カテゴリ（コンセプト）との関連付けを追加
                     if category and category != "General":
-                        self.graph_manager.link_hypothesis_to_concept(
-                            hypothesis_text=content,
+                        self.graph_manager.link_document_to_concept(
+                            document_text=content,
                             concept_name=category,
                             rel_type="MENTIONED_IN"
                         )
