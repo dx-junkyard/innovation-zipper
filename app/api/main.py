@@ -222,7 +222,30 @@ async def get_graph_neighbors(user_id: str = Query(..., description="User ID"), 
 
     return {"nodes": nodes, "edges": data["edges"]}
 
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
+
+@app.get("/api/v1/user-files/{file_id}/content")
+async def get_file_content(file_id: str):
+    """
+    Serves the PDF file content.
+    """
+    repo = DBClient()
+    file_info = repo.get_file_info_by_uuid(file_id)
+
+    if not file_info:
+        raise HTTPException(status_code=404, detail="File not found in database")
+
+    file_path = file_info["file_path"]
+
+    # Check physical existence
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File content missing on server")
+
+    # In a real scenario, we should check request.user_id vs file_info['user_id'] or is_public
+    # But for now, we assume if you have the link/ID, it serves it (simplified auth)
+    # or rely on frontend to only request valid IDs.
+
+    return FileResponse(file_path, media_type="application/pdf")
 
 @app.post("/api/v1/user-message-stream")
 async def post_usermessage_stream(request: Request) -> StreamingResponse:

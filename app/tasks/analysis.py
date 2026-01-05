@@ -224,23 +224,43 @@ def process_document_task(user_id: str, file_path: str, title: str, file_id: str
             logger.warning(f"No reliable categories found for document: {title}")
 
         # ---------------------------------------------------------
-        # [New Logic] Graph Update for All Categories
+        # [New Logic] Graph Update: Create File Node & Link to Categories
         # ---------------------------------------------------------
-        # ドキュメントから検出された全ての文脈を興味グラフに反映する
         if detected_categories:
             try:
-                # 1. Update Graph
+                # 1. Update Graph (Categories)
                 for cat in detected_categories:
                     km.graph_manager.add_category_and_keywords(
                         user_id=user_id,
                         category_name=cat["name"],
                         confidence=cat.get("confidence", 0.5),
-                        keywords=[], # Semantic Searchではキーワードは空でもOK
+                        keywords=[],
                         source_type="document_analysis"
                     )
-                logger.info(f"Updated Interest Graph with {len(detected_categories)} categories.")
 
-                # 2. Update File Categories in MySQL
+                # 2. Create File Node (Document) linked to Primary Category
+                # The prompt says link to "category", usually primary.
+                # We can also link to all detected categories if needed, but let's stick to primary for now to avoid clutter,
+                # or link to all. Let's link to primary.
+
+                file_url = f"/api/v1/user-files/{file_id}/content"
+                km.graph_manager.add_document(
+                    text=title,
+                    file_id=file_id,
+                    url=file_url,
+                    properties={"title": title, "summary": f"Uploaded file: {title}"}
+                )
+
+                if primary_category and primary_category != "Uncategorized":
+                    km.graph_manager.link_document_to_concept(
+                        document_text=title,
+                        concept_name=primary_category,
+                        rel_type="BELONGS_TO"
+                    )
+
+                logger.info(f"Created File Node for {title} linked to {primary_category}")
+
+                # 3. Update File Categories in MySQL
                 if db_file_id:
                     category_names = [c["name"] for c in detected_categories]
                     repo.update_file_category(db_file_id, category_names, is_verified=False)

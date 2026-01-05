@@ -9,11 +9,13 @@ class GraphManager:
     LABEL_KEYWORD = "Keyword"
     LABEL_HYPOTHESIS = "Hypothesis"
     LABEL_DOCUMENT = "Document"
+    LABEL_DOCUMENT_CHUNK = "DocumentChunk"
 
     # Edge Types
     REL_INTERESTED_IN = "INTERESTED_IN"
     REL_BELONGS_TO = "BELONGS_TO"
     REL_MENTIONED_IN = "MENTIONED_IN"
+    REL_PART_OF = "PART_OF"
     REL_IMPLIES = "IMPLIES"
     REL_VERIFIED_BY = "VERIFIED_BY"
 
@@ -156,20 +158,35 @@ class GraphManager:
         except Exception as e:
             print(f"Error adding hypothesis: {e}")
 
-    def add_document(self, text: str, evidence_ids: List[str] = None, properties: Dict[str, Any] = None):
-        """Adds a Document node."""
+    def add_document(self, text: str, file_id: str = None, url: str = None, properties: Dict[str, Any] = None):
+        """Adds a Document node (representing the file)."""
         if not self.driver: return
         query = f"""
         MERGE (d:{self.LABEL_DOCUMENT} {{text: $text}})
-        SET d.evidence = $evidence
+        SET d.file_id = $file_id, d.url = $url
         SET d += $props
         RETURN d
         """
         try:
             with self.driver.session() as session:
-                session.run(query, text=text, evidence=evidence_ids or [], props=properties or {})
+                session.run(query, text=text, file_id=file_id, url=url, props=properties or {})
         except Exception as e:
             print(f"Error adding document: {e}")
+
+    def add_chunk(self, text: str, evidence_ids: List[str] = None, properties: Dict[str, Any] = None):
+        """Adds a DocumentChunk node."""
+        if not self.driver: return
+        query = f"""
+        MERGE (dc:{self.LABEL_DOCUMENT_CHUNK} {{text: $text}})
+        SET dc.evidence = $evidence
+        SET dc += $props
+        RETURN dc
+        """
+        try:
+            with self.driver.session() as session:
+                session.run(query, text=text, evidence=evidence_ids or [], props=properties or {})
+        except Exception as e:
+            print(f"Error adding chunk: {e}")
 
     def link_hypothesis_to_concept(self, hypothesis_text: str, concept_name: str, rel_type: str = "IMPLIES"):
         """Links a Hypothesis to a Concept (or vice versa depending on logic, here we assume Hypothesis IMPLIES Concept or relates to it)."""
@@ -188,8 +205,8 @@ class GraphManager:
         except Exception as e:
             print(f"Error linking hypothesis to concept: {e}")
 
-    def link_document_to_concept(self, document_text: str, concept_name: str, rel_type: str = "MENTIONED_IN"):
-        """Links a Document to a Concept."""
+    def link_document_to_concept(self, document_text: str, concept_name: str, rel_type: str = "BELONGS_TO"):
+        """Links a Document (File) to a Concept (Category)."""
         if not self.driver: return
 
         query = f"""
@@ -203,6 +220,22 @@ class GraphManager:
                 session.run(query, d_text=document_text, c_name=concept_name)
         except Exception as e:
             print(f"Error linking document to concept: {e}")
+
+    def link_chunk_to_document(self, chunk_text: str, file_node_text: str, rel_type: str = "PART_OF"):
+        """Links a DocumentChunk to a Document."""
+        if not self.driver: return
+
+        query = f"""
+        MATCH (dc:{self.LABEL_DOCUMENT_CHUNK} {{text: $chunk_text}})
+        MATCH (d:{self.LABEL_DOCUMENT} {{text: $file_text}})
+        MERGE (dc)-[r:{rel_type}]->(d)
+        RETURN r
+        """
+        try:
+            with self.driver.session() as session:
+                session.run(query, chunk_text=chunk_text, file_text=file_node_text)
+        except Exception as e:
+            print(f"Error linking chunk to document: {e}")
 
     def get_user_interests(self, user_id: str) -> List[Dict[str, Any]]:
         """Retrieves concepts the user is interested in."""

@@ -372,10 +372,51 @@ def render_graph_view():
                 elif node_type == "Document":
                     props = getattr(selected_node, "properties", {})
                     st.markdown(f"### 📄 {props.get('title', 'ドキュメント')}")
+
+                    file_id = props.get("file_id")
+                    raw_url = props.get("url", "")
+
+                    # Resolve URL for browser access
+                    browser_api_url = os.environ.get("BROWSER_API_URL", "http://localhost:8000/api/v1")
+                    # Remove trailing slash if present
+                    if browser_api_url.endswith("/"):
+                        browser_api_url = browser_api_url[:-1]
+
+                    pdf_url = None
+                    if file_id:
+                        pdf_url = f"{browser_api_url}/user-files/{file_id}/content"
+                    elif raw_url.startswith("/"):
+                        # If raw_url is /api/v1/..., and browser_api_url includes /api/v1, we need to be careful.
+                        # raw_url from process_document_task is /api/v1/user-files/...
+                        # If browser_api_url is http://localhost:8000/api/v1, joining might duplicate /api/v1 if we are not careful.
+                        # But typically raw_url is absolute path.
+                        # Let's assume browser_api_url is the base API endpoint.
+
+                        # Handle the case where raw_url already contains /api/v1
+                        if raw_url.startswith("/api/v1") and browser_api_url.endswith("/api/v1"):
+                             # browser_api_url: http://localhost:8000/api/v1
+                             # raw_url: /api/v1/user-files/xxx
+                             # We want: http://localhost:8000/api/v1/user-files/xxx
+                             # So we replace the first /api/v1 in raw_url or just strip base from browser_api_url.
+                             # Safer: Use the host part of browser_api_url if raw_url is full path.
+
+                             # Simpler approach: Define BROWSER_BASE_URL (http://localhost:8000)
+                             browser_base_url = browser_api_url.replace("/api/v1", "")
+                             pdf_url = f"{browser_base_url}{raw_url}"
+                        else:
+                             pdf_url = f"{browser_api_url}{raw_url}"
+
+                    elif raw_url:
+                        pdf_url = raw_url
+
+                    if pdf_url:
+                        st.link_button("🔗 ファイルを開く (Open File)", pdf_url)
+
+                    if file_id and pdf_url:
+                        st.markdown(f'<iframe src="{pdf_url}" width="100%" height="600" type="application/pdf"></iframe>', unsafe_allow_html=True)
+
                     if "summary" in props:
                         st.caption(props["summary"])
-                    if "url" in props:
-                        st.link_button("🔗 元記事を開く", props["url"])
 
                 st.divider()
                 if st.button("🧪 構造分解する", key=f"analyze_{selected_node_id}"):

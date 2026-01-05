@@ -122,17 +122,19 @@ class KnowledgeManager:
                     self.graph_manager.add_hypothesis(text=content, evidence_ids=[entry_id], properties=meta)
                     self.graph_manager.link_hypothesis_to_concept(content, category)
 
-                # If memory is a document chunk, add it as a Document node
+                # If memory is a document chunk, add it as a DocumentChunk node
                 elif memory_type == "document_chunk":
-                    # We treat document chunks as Document nodes from a file source
-                    self.graph_manager.add_document(text=content, evidence_ids=[entry_id], properties=meta)
+                    # Create Chunk Node
+                    self.graph_manager.add_chunk(text=content, evidence_ids=[entry_id], properties=meta)
 
-                    # ★修正: カテゴリ（コンセプト）との関連付けを追加
-                    if category and category != "General":
-                        self.graph_manager.link_document_to_concept(
-                            document_text=content,
-                            concept_name=category,
-                            rel_type="MENTIONED_IN"
+                    # Link Chunk -> Document (File)
+                    # We assume 'title' in meta is the text identifier for the Document node
+                    file_title = meta.get("title")
+                    if file_title:
+                        self.graph_manager.link_chunk_to_document(
+                            chunk_text=content,
+                            file_node_text=file_title,
+                            rel_type="PART_OF"
                         )
 
             return True

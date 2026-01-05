@@ -47,6 +47,26 @@ class DBClient:
                 conn.close()
         return user_id
 
+    def get_file_info_by_uuid(self, file_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieves file info by UUID (extracted from file_path).
+        """
+        conn = None
+        cursor = None
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor(dictionary=True)
+            # Search by file path pattern since UUID is not a column
+            query = "SELECT id, user_id, file_path, is_public, title FROM user_files WHERE file_path LIKE %s LIMIT 1"
+            cursor.execute(query, (f"%/{file_id}.pdf",))
+            return cursor.fetchone()
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in get_file_info_by_uuid: {err}")
+            return None
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
     def check_file_exists(self, user_id: str, file_hash: str) -> bool:
         """
         Check if the file already exists for the user or is public.
