@@ -440,14 +440,15 @@ async def upload_user_file(
         raise HTTPException(status_code=500, detail="Failed to save file.")
 
     # Insert into MySQL
-    if not repo.insert_user_file(user_id, file.filename, file_path, title, file_hash, is_public):
+    db_file_id = repo.insert_user_file(user_id, file.filename, file_path, title, file_hash, is_public)
+    if not db_file_id:
         # Cleanup file if DB fails
         if os.path.exists(file_path):
             os.remove(file_path)
         raise HTTPException(status_code=500, detail="Database insertion failed.")
 
     # Trigger Background Task
-    task = process_document_task.delay(user_id, file_path, title, file_id)
+    task = process_document_task.delay(user_id, file_path, title, file_id, db_file_id)
 
     return {
         "status": "uploaded",
@@ -461,7 +462,7 @@ class ContentFeedbackRequest(BaseModel):
     user_id: str
     content_id: int
     content_type: str # 'file' or 'capture'
-    new_category: str
+    new_categories: List[str]
     text_to_learn: Optional[str] = None # Text content to use for learning
 
 class ConversationFeedbackRequest(BaseModel):
@@ -477,28 +478,32 @@ async def feedback_content(request: ContentFeedbackRequest):
 
     # 1. Update Database
     if request.content_type == 'file':
-        success = repo.update_file_category(request.content_id, request.new_category, is_verified=True)
+        success = repo.update_file_category(request.content_id, request.new_categories, is_verified=True)
     elif request.content_type == 'capture':
-        success = repo.update_capture_category(request.content_id, request.new_category, is_verified=True)
+        # Backward compatibility for captures (single category)
+        primary_category = request.new_categories[0] if request.new_categories else "Uncategorized"
+        success = repo.update_capture_category(request.content_id, primary_category, is_verified=True)
     else:
         raise HTTPException(status_code=400, detail="Invalid content_type")
 
     if not success:
         raise HTTPException(status_code=500, detail="Database update failed")
 
-    # 2. Learn in Topic Service
-    if request.text_to_learn:
-        # Truncate text if too long (e.g., 500 chars)
-        text_snippet = request.text_to_learn[:500]
-        topic_client.learn_text(text_snippet, request.new_category)
+    # 2. Learn in Topic Service & Update Graph
+    if request.new_categories:
+        for cat in request.new_categories:
+            if request.text_to_learn:
+                # Truncate text if too long (e.g., 500 chars)
+                text_snippet = request.text_to_learn[:500]
+                topic_client.learn_text(text_snippet, cat)
 
-    # 3. Update Knowledge Graph
-    graph_manager.add_user_interest(
-        user_id=request.user_id,
-        concept_name=request.new_category,
-        confidence=1.0,
-        source_type=graph_manager.SOURCE_USER_STATED
-    )
+            # 3. Update Knowledge Graph
+            graph_manager.add_user_interest(
+                user_id=request.user_id,
+                concept_name=cat,
+                confidence=1.0,
+                source_type=graph_manager.SOURCE_USER_STATED
+            )
 
     return {"status": "success", "message": "Content updated and learned."}
 

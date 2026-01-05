@@ -66,7 +66,7 @@ def fetch_all_user_contents(user_id):
         st.error(f"コンテンツ取得エラー: {e}")
         return []
 
-def send_content_feedback(user_id, content_id, content_type, new_category, text_to_learn=None):
+def send_content_feedback(user_id, content_id, content_type, new_categories, text_to_learn=None):
     """コンテンツのカテゴリフィードバックを送信"""
     try:
         base_url = get_base_url()
@@ -76,7 +76,7 @@ def send_content_feedback(user_id, content_id, content_type, new_category, text_
             "user_id": user_id,
             "content_id": content_id,
             "content_type": content_type,
-            "new_category": new_category,
+            "new_categories": new_categories,
             "text_to_learn": text_to_learn
         }
         resp = requests.post(target_url, json=payload)
@@ -86,9 +86,60 @@ def send_content_feedback(user_id, content_id, content_type, new_category, text_
         st.error(f"フィードバック送信エラー: {e}")
         return False
 
+@st.cache_data
+def load_categories():
+    """カテゴリ定義を読み込む"""
+    try:
+        path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../topic-service/categories.json'))
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        st.error(f"カテゴリ定義の読み込みに失敗しました: {e}")
+        return {}
+
+def category_edit_dialog(item, category_data, user_id):
+    """カテゴリ編集用ダイアログ"""
+    st.write(f"**{item['title']}** のカテゴリを編集")
+
+    current_cats = item.get('category', [])
+    if isinstance(current_cats, str):
+        current_cats = [current_cats]
+
+    # 既存カテゴリから初期選択状態を推測するのは少し難しいが、単純にサブカテゴリ名マッチで探す
+    # ここではユーザーがゼロから選び直すUIとする（既存カテゴリは参考表示）
+    st.caption(f"現在のカテゴリ: {', '.join(current_cats)}")
+
+    main_cats = list(category_data.keys())
+
+    # 1. 大カテゴリ選択
+    selected_mains = st.multiselect("大カテゴリを選択", main_cats)
+
+    # 2. サブカテゴリ選択 (フィルタリング)
+    available_subs = []
+    for m in selected_mains:
+        subs = category_data[m].get("subcategories", [])
+        for s in subs:
+            available_subs.append(s["category"])
+
+    selected_subs = st.multiselect("サブカテゴリを選択（最終的なタグになります）", available_subs)
+
+    if st.button("保存して更新"):
+        if selected_subs:
+             text_to_learn = f"{item['title']} {item.get('source', '')}"
+             if send_content_feedback(user_id, item['id'], item['type'], selected_subs, text_to_learn):
+                 st.success("更新しました！")
+                 st.rerun()
+        else:
+            st.warning("少なくとも1つのサブカテゴリを選択してください。")
+
+@st.dialog("カテゴリ編集")
+def open_category_dialog(item, category_data, user_id):
+    category_edit_dialog(item, category_data, user_id)
+
 def render_data_management_tab():
     st.subheader("🗃️ Knowledge Gardening (データ管理・育成)")
     user_id = st.session_state.get("user_id")
+    category_data = load_categories()
 
     # リロードボタン
     if st.button("🔄 データを更新"):
@@ -101,15 +152,14 @@ def render_data_management_tab():
         return
 
     # Header
-    cols = st.columns([3, 2, 2, 2])
+    cols = st.columns([4, 3, 2])
     cols[0].markdown("**タイトル / ソース**")
     cols[1].markdown("**現在のカテゴリ**")
-    cols[2].markdown("**修正**")
-    cols[3].markdown("**アクション**")
+    cols[2].markdown("**アクション**")
 
     for idx, item in enumerate(contents):
         with st.container():
-            cols = st.columns([3, 2, 2, 2])
+            cols = st.columns([4, 3, 2])
 
             # 1. Title & Source
             icon = "📄" if item['type'] == 'file' else "🌐"
@@ -119,24 +169,21 @@ def render_data_management_tab():
 
             cols[0].markdown(f"{icon} **{item['title']}**\n\n<span style='color:gray; font-size:0.8em'>{source_display}</span>", unsafe_allow_html=True)
 
-            # 2. Current Category
+            # 2. Current Category (Tags)
             is_verified = item.get("is_verified", False)
             status_icon = "✅" if is_verified else "❓"
-            cols[1].markdown(f"{status_icon} {item.get('category', 'Uncategorized')}")
 
-            # 3. Modification
-            new_cat = cols[2].text_input("新しいカテゴリ", value=item.get('category', ''), key=f"cat_{item['id']}_{item['type']}")
+            categories = item.get('category', [])
+            if isinstance(categories, str): # Fallback
+                categories = [categories]
 
-            # 4. Action
-            if cols[3].button("学習・更新", key=f"btn_{item['id']}_{item['type']}"):
-                if new_cat and new_cat != item.get('category'):
-                    text_to_learn = f"{item['title']} {item['source']}"
+            # Simple badge-like display
+            cat_html = " ".join([f"<span style='background-color:#E8F8F5; color:#148F77; padding:2px 8px; border-radius:12px; font-size:0.8em; margin-right:4px;'>{c}</span>" for c in categories])
+            cols[1].markdown(f"{status_icon} {cat_html}", unsafe_allow_html=True)
 
-                    if send_content_feedback(user_id, item['id'], item['type'], new_cat, text_to_learn):
-                        st.success(f"更新しました: {new_cat}")
-                        st.rerun()
-                else:
-                    st.warning("カテゴリを変更してください。")
+            # 3. Action
+            if cols[2].button("編集", key=f"edit_{item['id']}_{item['type']}"):
+                open_category_dialog(item, category_data, user_id)
 
             st.divider()
 
