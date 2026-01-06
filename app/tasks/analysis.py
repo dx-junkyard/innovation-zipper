@@ -5,10 +5,12 @@ import os
 import redis
 import pypdf
 import uuid
+import tempfile
 from typing import Dict, Any, Optional
 from qdrant_client.models import PointStruct
 
 from app.core.celery_app import celery_app
+from app.core.storage import storage
 from app.api.workflow import WorkflowManager
 from app.api.ai_client import AIClient
 from app.api.db import DBClient
@@ -160,23 +162,39 @@ def process_document_task(user_id: str, file_path: str, title: str, file_id: str
     """
     Background task to process uploaded documents (PDF).
     """
+    local_path = None
     try:
         logger.info(f"Starting process_document_task for {file_path}")
         km = KnowledgeManager()
         repo = DBClient()
 
-        if not os.path.exists(file_path):
-            logger.error(f"File not found: {file_path}")
-            return {"status": "error", "message": "File not found"}
+        # file_path argument is treated as S3 Key (Object Name)
+        object_name = file_path
+
+        # Download from S3 to temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+            local_path = tmp_file.name
+
+        try:
+            storage.download_file(object_name, local_path)
+        except Exception as e:
+            logger.error(f"Failed to download file from S3: {e}")
+            if os.path.exists(local_path):
+                os.remove(local_path)
+            return {"status": "error", "message": "File download failed"}
 
         text_content = ""
         try:
-            reader = pypdf.PdfReader(file_path)
+            reader = pypdf.PdfReader(local_path)
             for page in reader.pages:
                 text_content += page.extract_text() + "\n"
         except Exception as e:
             logger.error(f"Error reading PDF: {e}")
             return {"status": "error", "message": f"PDF reading failed: {str(e)}"}
+        finally:
+            # Cleanup temp file
+            if local_path and os.path.exists(local_path):
+                os.remove(local_path)
 
         if not text_content.strip():
              return {"status": "error", "message": "No text content extracted"}
