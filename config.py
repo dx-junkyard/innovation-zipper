@@ -28,6 +28,7 @@ class Settings(BaseSettings):
 
     # --- S3 / MinIO Configuration ---
     S3_ENDPOINT_URL: str = "http://minio:9000" # Docker network alias
+    S3_PUBLIC_ENDPOINT_URL: str = "http://localhost:9000" # ブラウザから見た外部URL (New)
     S3_ACCESS_KEY: str = "minioadmin"
     S3_SECRET_KEY: str = "minioadminpassword"
     S3_BUCKET_NAME: str = "user-files"

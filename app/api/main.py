@@ -252,7 +252,7 @@ async def get_file_content(file_id: str):
     if not url:
         raise HTTPException(status_code=404, detail="File not found or S3 error")
 
-    return RedirectResponse(url=url)
+    return {"url": url}
 
 @app.post("/api/v1/user-message-stream")
 async def post_usermessage_stream(request: Request) -> StreamingResponse:

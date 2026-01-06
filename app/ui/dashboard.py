@@ -4,6 +4,13 @@ import os
 import graphviz
 import json
 from streamlit_agraph import agraph, Node, Edge, Config
+try:
+    from config import settings
+except ImportError:
+    class MockSettings:
+        S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL", "http://minio:9000")
+        S3_PUBLIC_ENDPOINT_URL = os.environ.get("S3_PUBLIC_ENDPOINT_URL", "http://localhost:9000")
+    settings = MockSettings()
 
 API_URL = os.environ.get("API_URL", "http://api:8000/api/v1")
 
@@ -391,43 +398,30 @@ def render_graph_view():
                     file_id = props.get("file_id")
                     raw_url = props.get("url", "")
 
-                    # Resolve URL for browser access
-                    browser_api_url = os.environ.get("BROWSER_API_URL", "http://localhost:8000/api/v1")
-                    # Remove trailing slash if present
-                    if browser_api_url.endswith("/"):
-                        browser_api_url = browser_api_url[:-1]
-
                     pdf_url = None
                     if file_id:
-                        pdf_url = f"{browser_api_url}/user-files/{file_id}/content"
-                    elif raw_url.startswith("/"):
-                        # If raw_url is /api/v1/..., and browser_api_url includes /api/v1, we need to be careful.
-                        # raw_url from process_document_task is /api/v1/user-files/...
-                        # If browser_api_url is http://localhost:8000/api/v1, joining might duplicate /api/v1 if we are not careful.
-                        # But typically raw_url is absolute path.
-                        # Let's assume browser_api_url is the base API endpoint.
-
-                        # Handle the case where raw_url already contains /api/v1
-                        if raw_url.startswith("/api/v1") and browser_api_url.endswith("/api/v1"):
-                             # browser_api_url: http://localhost:8000/api/v1
-                             # raw_url: /api/v1/user-files/xxx
-                             # We want: http://localhost:8000/api/v1/user-files/xxx
-                             # So we replace the first /api/v1 in raw_url or just strip base from browser_api_url.
-                             # Safer: Use the host part of browser_api_url if raw_url is full path.
-
-                             # Simpler approach: Define BROWSER_BASE_URL (http://localhost:8000)
-                             browser_base_url = browser_api_url.replace("/api/v1", "")
-                             pdf_url = f"{browser_base_url}{raw_url}"
-                        else:
-                             pdf_url = f"{browser_api_url}{raw_url}"
-
+                        # Fetch presigned URL from API and convert to public URL
+                        api_target = f"{API_URL}/user-files/{file_id}/content"
+                        try:
+                            res = requests.get(api_target)
+                            if res.status_code == 200:
+                                data = res.json()
+                                raw_signed_url = data.get("url")
+                                if raw_signed_url:
+                                    # Replace internal Docker URL with Public Browser URL dynamically
+                                    pdf_url = raw_signed_url.replace(settings.S3_ENDPOINT_URL, settings.S3_PUBLIC_ENDPOINT_URL)
+                                else:
+                                    st.warning("File URL not found in API response.")
+                            else:
+                                st.error(f"Failed to fetch file URL (Status: {res.status_code})")
+                        except Exception as e:
+                            st.error(f"Error connecting to API: {e}")
                     elif raw_url:
+                        # Backward compatibility or fallback
                         pdf_url = raw_url
 
                     if pdf_url:
                         st.link_button("🔗 ファイルを開く (Open File)", pdf_url)
-
-                    if file_id and pdf_url:
                         st.markdown(f'<iframe src="{pdf_url}" width="100%" height="600" type="application/pdf"></iframe>', unsafe_allow_html=True)
 
                     if "summary" in props:
