@@ -299,17 +299,23 @@ def merge_graph_data(current_nodes, current_edges, new_data, node_styles):
                 node_shape = style.get("shape", "dot")
                 image_path = None
 
-            current_nodes.append(Node(
-                id=n["id"],
-                label=format_node_label(n["label"]),
-                size=size,
-                color=color,
-                shape=node_shape,
-                image=image_path,
-                title=n.get("label"),
-                type=node_type,
-                properties=n.get("properties", {})
-            ))
+            # ノードのパラメータを辞書で構築
+            node_config = {
+                "id": n["id"],
+                "label": format_node_label(n["label"]),
+                "size": size,
+                "color": color,
+                "shape": node_shape,
+                "title": n.get("label"),
+                "type": node_type,
+                "properties": n.get("properties", {})
+            }
+
+            # 画像がある場合のみ image キーを追加
+            if image_path:
+                node_config["image"] = image_path
+
+            current_nodes.append(Node(**node_config))
             existing_ids.add(n["id"])
 
     for e in new_data.get("edges", []):
@@ -338,12 +344,16 @@ def render_graph_view():
         "Document": {"color": "#95A5A6", "size": 20, "shape": "box"}
     }
 
-    # 1. Session Stateの初期化
-    if "graph_nodes" not in st.session_state:
+    # 1. キャッシュの強制クリアと初期化
+    if "graph_version" not in st.session_state or st.session_state["graph_version"] != "v2":
+        # データ構造が変わったためリセット
         st.session_state["graph_nodes"] = []
         st.session_state["graph_edges"] = []
         st.session_state["expanded_nodes"] = set()
+        st.session_state["graph_version"] = "v2" # バージョン更新
+        st.session_state["last_clicked_node_id"] = None # クリック状態もリセット
 
+    if not st.session_state["graph_nodes"]:
         init_data = fetch_knowledge_graph(user_id)
         if init_data:
             st.session_state["graph_nodes"], st.session_state["graph_edges"] = merge_graph_data(
