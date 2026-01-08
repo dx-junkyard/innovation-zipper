@@ -289,15 +289,24 @@ def merge_graph_data(current_nodes, current_edges, new_data, node_styles):
             size = n.get("size") or style["size"]
 
             # プロパティから画像URLを取得
-            image_url = n.get("properties", {}).get("image")
+            raw_image_url = n.get("properties", {}).get("image")
 
-            # 画像URLがある場合のみ shape="image" を許可
-            if image_url:
+            # [Fix] 画像URLの検証を厳格化 (文字列かつ http または / で始まるもののみ許可)
+            # これを行わないと、ラベル名などが画像パスとして誤解釈され、404エラー(read error)を引き起こす
+            is_valid_image = isinstance(raw_image_url, str) and (raw_image_url.startswith("http") or raw_image_url.startswith("/"))
+
+            if is_valid_image:
                 node_shape = "image"
-                image_path = image_url
+                image_path = raw_image_url
             else:
                 node_shape = style.get("shape", "dot")
                 image_path = None
+
+            # [Fix] フロントエンドに渡すプロパティのサニタイズ
+            # imageキーが残っていると vis.js が混乱する場合があるため除外して渡す
+            safe_properties = n.get("properties", {}).copy()
+            if "image" in safe_properties:
+                del safe_properties["image"]
 
             # ノードのパラメータを辞書で構築
             node_config = {
@@ -308,7 +317,7 @@ def merge_graph_data(current_nodes, current_edges, new_data, node_styles):
                 "shape": node_shape,
                 "title": n.get("label"),
                 "type": node_type,
-                "properties": n.get("properties", {})
+                "properties": safe_properties # [Fix] サニタイズ済みプロパティを使用
             }
 
             # 画像がある場合のみ image キーを追加
@@ -370,6 +379,7 @@ def render_graph_view():
         nodeHighlightBehavior=True,
         highlightColor="#F7A7A6",
         collapsible=False,
+        groups={},  # [Fix] 空のgroups定義を追加して警告を抑制
         node={
             "labelProperty": "label",
             "renderLabel": True,
