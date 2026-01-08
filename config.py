@@ -3,13 +3,43 @@
 
 import os
 from dotenv import load_dotenv
+from pydantic_settings import BaseSettings
 
 load_dotenv()
 
-# --- Base Model Definitions ---
-# 基本となるモデル定義（環境変数で上書き可能）
-MODEL_FAST = os.getenv("MODEL_FAST", "gpt-5-mini") # 速度・コスト重視
-MODEL_SMART = os.getenv("MODEL_SMART", "gpt-5.2")    # 品質・推論能力重視
+class Settings(BaseSettings):
+    # --- Base Model Definitions ---
+    # 基本となるモデル定義（環境変数で上書き可能）
+    MODEL_FAST: str = "gpt-5-mini" # 速度・コスト重視
+    MODEL_SMART: str = "gpt-5.2"   # 品質・推論能力重視
+
+    # --- LLM & Embedding ---
+    LLM_MODEL: str = "gpt-5-mini"
+    EMBEDDING_MODEL: str = "text-embedding-3-small"
+    EMBEDDING_DIMENSION: int = 1536
+    AI_URL: str = "http://host.docker.internal:11434"
+
+    # --- DB Configuration ---
+    DB_HOST: str = "db"
+    DB_USER: str = "me"
+    DB_PASSWORD: str = "me"
+    DB_NAME: str = "mydb"
+    DB_PORT: int = 3306
+
+    # --- S3 / MinIO Configuration ---
+    S3_ENDPOINT_URL: str = "http://minio:9000" # Docker network alias
+    S3_PUBLIC_ENDPOINT_URL: str = "http://localhost:9000" # ブラウザから見た外部URL (New)
+    S3_ACCESS_KEY: str = "minioadmin"
+    S3_SECRET_KEY: str = "minioadminpassword"
+    S3_BUCKET_NAME: str = "user-files"
+    S3_REGION_NAME: str = "us-east-1" # MinIO default
+    S3_USE_SSL: bool = False
+
+settings = Settings()
+
+# --- Export Globals for Backward Compatibility ---
+MODEL_FAST = settings.MODEL_FAST
+MODEL_SMART = settings.MODEL_SMART
 
 # --- Task Specific Model Assignments ---
 # 利用タイミングごとのモデル割り当て
@@ -57,13 +87,14 @@ MODEL_REPORT_GENERATION = MODEL_SMART
 # 11. 応答計画 (品質重視)
 MODEL_RESPONSE_PLANNING = MODEL_SMART
 
-LLM_MODEL = os.getenv("LLM_MODEL") or "gpt-5-mini"
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL") or "text-embedding-3-small"
-EMBEDDING_DIMENSION = int(os.getenv("EMBEDDING_DIMENSION") or 1536)
-AI_URL = "http://host.docker.internal:11434"
 
-DB_HOST = os.getenv("DB_HOST", "db")
-DB_USER = os.getenv("DB_USER", "me")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "me")
-DB_NAME = os.getenv("DB_NAME", "mydb")
-DB_PORT = int(os.getenv("DB_PORT", 3306))
+LLM_MODEL = settings.LLM_MODEL
+EMBEDDING_MODEL = settings.EMBEDDING_MODEL
+EMBEDDING_DIMENSION = settings.EMBEDDING_DIMENSION
+AI_URL = settings.AI_URL
+
+DB_HOST = settings.DB_HOST
+DB_USER = settings.DB_USER
+DB_PASSWORD = settings.DB_PASSWORD
+DB_NAME = settings.DB_NAME
+DB_PORT = settings.DB_PORT

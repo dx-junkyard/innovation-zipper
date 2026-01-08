@@ -4,6 +4,13 @@ import os
 import graphviz
 import json
 from streamlit_agraph import agraph, Node, Edge, Config
+try:
+    from config import settings
+except ImportError:
+    class MockSettings:
+        S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL", "http://minio:9000")
+        S3_PUBLIC_ENDPOINT_URL = os.environ.get("S3_PUBLIC_ENDPOINT_URL", "http://localhost:9000")
+    settings = MockSettings()
 
 API_URL = os.environ.get("API_URL", "http://api:8000/api/v1")
 
@@ -248,7 +255,22 @@ def render_innovation_zipper(analysis_data):
 def merge_graph_data(current_nodes, current_edges, new_data, node_styles):
     """既存のグラフデータに新しいデータをマージするヘルパー関数"""
     existing_ids = {n.id for n in current_nodes}
-    existing_edges = {(e.source, e.target) for e in current_edges}
+
+    # --- 修正開始: Edgeオブジェクトの属性アクセスを安全に行う ---
+    existing_edges = set()
+    for e in current_edges:
+        # Edgeオブジェクトからsource/targetを取得（存在しない場合はNone）
+        s = getattr(e, "source", None)
+        t = getattr(e, "target", None)
+
+        # 属性が見つからない場合のフォールバック（__dict__経由など）
+        if s is None and hasattr(e, "__dict__"):
+             s = e.__dict__.get("source")
+             t = e.__dict__.get("target")
+
+        if s and t:
+            existing_edges.add((s, t))
+    # --- 修正終了 -------------------------------------------
 
     for n in new_data.get("nodes", []):
         if n["id"] not in existing_ids:
@@ -372,10 +394,40 @@ def render_graph_view():
                 elif node_type == "Document":
                     props = getattr(selected_node, "properties", {})
                     st.markdown(f"### 📄 {props.get('title', 'ドキュメント')}")
+
+                    file_id = props.get("file_id")
+                    raw_url = props.get("url", "")
+
+                    pdf_url = None
+                    if file_id:
+                        # Fetch presigned URL from API and convert to public URL
+                        api_target = f"{API_URL}/user-files/{file_id}/content"
+                        try:
+                            res = requests.get(api_target)
+                            if res.status_code == 200:
+                                data = res.json()
+                                raw_signed_url = data.get("url")
+                                if raw_signed_url:
+                                    # 削除: 文字列置換ロジックは不要になりました
+                                    # if pdf_url:
+                                    #    pdf_url = pdf_url.replace(settings.S3_ENDPOINT_URL, settings.S3_PUBLIC_ENDPOINT_URL)
+                                    pdf_url = raw_signed_url
+                                else:
+                                    st.warning("File URL not found in API response.")
+                            else:
+                                st.error(f"Failed to fetch file URL (Status: {res.status_code})")
+                        except Exception as e:
+                            st.error(f"Error connecting to API: {e}")
+                    elif raw_url:
+                        # Backward compatibility or fallback
+                        pdf_url = raw_url
+
+                    if pdf_url:
+                        st.link_button("🔗 ファイルを開く (Open File)", pdf_url)
+                        st.markdown(f'<iframe src="{pdf_url}" width="100%" height="600" type="application/pdf"></iframe>', unsafe_allow_html=True)
+
                     if "summary" in props:
                         st.caption(props["summary"])
-                    if "url" in props:
-                        st.link_button("🔗 元記事を開く", props["url"])
 
                 st.divider()
                 if st.button("🧪 構造分解する", key=f"analyze_{selected_node_id}"):

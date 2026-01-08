@@ -24,8 +24,18 @@ import requests
 import aiofiles
 import uuid
 from fastapi import UploadFile, File, Form
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+from app.core.storage import storage
+import io
 
 app = FastAPI()
+
+# Trust headers from Load Balancer/Proxy
+app.add_middleware(
+    ProxyHeadersMiddleware,
+    trusted_hosts=["*"]
+)
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -222,7 +232,27 @@ async def get_graph_neighbors(user_id: str = Query(..., description="User ID"), 
 
     return {"nodes": nodes, "edges": data["edges"]}
 
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse, RedirectResponse
+
+@app.get("/api/v1/user-files/{file_id}/content")
+async def get_file_content(file_id: str):
+    """
+    Redirects to a presigned URL for the PDF file content.
+    """
+    repo = DBClient()
+    file_info = repo.get_file_info_by_uuid(file_id)
+
+    if not file_info:
+        raise HTTPException(status_code=404, detail="File not found in database")
+
+    # file_path in DB is now the Object Key (S3)
+    object_name = file_info["file_path"]
+
+    url = storage.generate_presigned_url(object_name)
+    if not url:
+        raise HTTPException(status_code=404, detail="File not found or S3 error")
+
+    return {"url": url}
 
 @app.post("/api/v1/user-message-stream")
 async def post_usermessage_stream(request: Request) -> StreamingResponse:
@@ -403,7 +433,7 @@ async def upload_user_file(
     file: UploadFile = File(...)
 ):
     """
-    Handles PDF file upload, saves it, records in DB, and triggers background processing.
+    Handles PDF file upload, saves it to S3, records in DB, and triggers background processing.
     """
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
@@ -420,35 +450,30 @@ async def upload_user_file(
     # Generate unique ID for the file
     file_id = str(uuid.uuid4())
 
-    # Define storage path (ensure app/uploads exists)
-    upload_dir = "/app/uploads"
-    os.makedirs(upload_dir, exist_ok=True)
-
-    # Create safe filename
+    # Create safe filename (S3 Object Key)
     file_ext = os.path.splitext(file.filename)[1]
     safe_filename = f"{file_id}{file_ext}"
-    file_path = os.path.join(upload_dir, safe_filename)
+    object_name = safe_filename
 
-    # Save file to disk
+    # Save file to S3
     try:
-        # Since we already read the content, we can just write it.
-        # But aiofiles expects async write.
-        async with aiofiles.open(file_path, 'wb') as out_file:
-            await out_file.write(content)
+        # storage.upload_file expects a file-like object
+        file_obj = io.BytesIO(content)
+        storage.upload_file(file_obj, object_name, content_type="application/pdf")
     except Exception as e:
-        logger.error(f"File save failed: {e}")
-        raise HTTPException(status_code=500, detail="Failed to save file.")
+        logger.error(f"S3 Upload failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to upload file to storage.")
 
     # Insert into MySQL
-    db_file_id = repo.insert_user_file(user_id, file.filename, file_path, title, file_hash, is_public)
+    # Store object_name as file_path
+    db_file_id = repo.insert_user_file(user_id, file.filename, object_name, title, file_hash, is_public)
     if not db_file_id:
-        # Cleanup file if DB fails
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        # Note: We might want to delete from S3 here if DB fails, but for now we skip complex rollback
         raise HTTPException(status_code=500, detail="Database insertion failed.")
 
     # Trigger Background Task
-    task = process_document_task.delay(user_id, file_path, title, file_id, db_file_id)
+    # Pass object_name as file_path
+    task = process_document_task.delay(user_id, object_name, title, file_id, db_file_id)
 
     return {
         "status": "uploaded",

@@ -19,6 +19,8 @@ services:
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
     volumes:
       - .:/app
+    networks:
+      - app-network
 
   admin-api:
     build:
@@ -37,6 +39,8 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
     volumes:
       - .:/app
+    networks:
+      - app-network
 
   ui:
     build:
@@ -46,6 +50,28 @@ services:
       - "8080:8501"
     volumes:
       - .:/app
+    networks:
+      - app-network
+
+  minio:
+    image: minio/minio:latest
+    container_name: innovation-zipper-minio
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadminpassword}
+    command: server /data --console-address ":9001"
+    volumes:
+      - ./data/minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - app-network
 
   db:
     image: mysql:8.0
@@ -54,25 +80,31 @@ services:
       MYSQL_DATABASE: mydb
       MYSQL_USER: me
       MYSQL_PASSWORD: me
-    ports:
-      - "3306:3306"
+    expose:
+      - "3306"
     volumes:
       - ./data/mysql:/var/lib/mysql
       - ./mysql/my.cnf:/etc/mysql/conf.d/my.cnf
       - ./mysql/db/:/docker-entrypoint-initdb.d
+    networks:
+      - app-network
 
   qdrant:
     image: qdrant/qdrant
-    ports:
-      - "6333:6333"
+    expose:
+      - "6333"
     volumes:
       - ./data/qdrant_storage:/qdrant/storage
+    networks:
+      - app-network
 
   redis:
     image: redis:alpine
     container_name: redis_broker
     ports:
       - "6379:6379"
+    networks:
+      - app-network
 
   worker:
     build:
@@ -97,16 +129,20 @@ services:
       - qdrant
       - neo4j
     command: celery -A app.core.celery_app worker --loglevel=info
+    networks:
+      - app-network
 
   neo4j:
     image: neo4j:latest
-    ports:
-      - "7474:7474"
-      - "7687:7687"
+    expose:
+      - "7474"
+      - "7687"
     environment:
       - NEO4J_AUTH=neo4j/password
     volumes:
       - ./data/neo4j_data:/data
+    networks:
+      - app-network
 
   topic-api:
     build:
@@ -120,3 +156,11 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+    networks:
+      - app-network
+
+volumes:
+  minio_data:
+
+networks:
+  app-network:

@@ -5,9 +5,12 @@ import os
 import redis
 import pypdf
 import uuid
+import tempfile
 from typing import Dict, Any, Optional
+from qdrant_client.models import PointStruct
 
 from app.core.celery_app import celery_app
+from app.core.storage import storage
 from app.api.workflow import WorkflowManager
 from app.api.ai_client import AIClient
 from app.api.db import DBClient
@@ -159,23 +162,39 @@ def process_document_task(user_id: str, file_path: str, title: str, file_id: str
     """
     Background task to process uploaded documents (PDF).
     """
+    local_path = None
     try:
         logger.info(f"Starting process_document_task for {file_path}")
         km = KnowledgeManager()
         repo = DBClient()
 
-        if not os.path.exists(file_path):
-            logger.error(f"File not found: {file_path}")
-            return {"status": "error", "message": "File not found"}
+        # file_path argument is treated as S3 Key (Object Name)
+        object_name = file_path
+
+        # Download from S3 to temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+            local_path = tmp_file.name
+
+        try:
+            storage.download_file(object_name, local_path)
+        except Exception as e:
+            logger.error(f"Failed to download file from S3: {e}")
+            if os.path.exists(local_path):
+                os.remove(local_path)
+            return {"status": "error", "message": "File download failed"}
 
         text_content = ""
         try:
-            reader = pypdf.PdfReader(file_path)
+            reader = pypdf.PdfReader(local_path)
             for page in reader.pages:
                 text_content += page.extract_text() + "\n"
         except Exception as e:
             logger.error(f"Error reading PDF: {e}")
             return {"status": "error", "message": f"PDF reading failed: {str(e)}"}
+        finally:
+            # Cleanup temp file
+            if local_path and os.path.exists(local_path):
+                os.remove(local_path)
 
         if not text_content.strip():
              return {"status": "error", "message": "No text content extracted"}
@@ -224,23 +243,43 @@ def process_document_task(user_id: str, file_path: str, title: str, file_id: str
             logger.warning(f"No reliable categories found for document: {title}")
 
         # ---------------------------------------------------------
-        # [New Logic] Graph Update for All Categories
+        # [New Logic] Graph Update: Create File Node & Link to Categories
         # ---------------------------------------------------------
-        # ドキュメントから検出された全ての文脈を興味グラフに反映する
         if detected_categories:
             try:
-                # 1. Update Graph
+                # 1. Update Graph (Categories)
                 for cat in detected_categories:
                     km.graph_manager.add_category_and_keywords(
                         user_id=user_id,
                         category_name=cat["name"],
                         confidence=cat.get("confidence", 0.5),
-                        keywords=[], # Semantic Searchではキーワードは空でもOK
+                        keywords=[],
                         source_type="document_analysis"
                     )
-                logger.info(f"Updated Interest Graph with {len(detected_categories)} categories.")
 
-                # 2. Update File Categories in MySQL
+                # 2. Create File Node (Document) linked to Primary Category
+                # The prompt says link to "category", usually primary.
+                # We can also link to all detected categories if needed, but let's stick to primary for now to avoid clutter,
+                # or link to all. Let's link to primary.
+
+                file_url = f"/api/v1/user-files/{file_id}/content"
+                km.graph_manager.add_document(
+                    text=title,
+                    file_id=file_id,
+                    url=file_url,
+                    properties={"title": title, "summary": f"Uploaded file: {title}"}
+                )
+
+                if primary_category and primary_category != "Uncategorized":
+                    km.graph_manager.link_document_to_concept(
+                        document_text=title,
+                        concept_name=primary_category,
+                        rel_type="BELONGS_TO"
+                    )
+
+                logger.info(f"Created File Node for {title} linked to {primary_category}")
+
+                # 3. Update File Categories in MySQL
                 if db_file_id:
                     category_names = [c["name"] for c in detected_categories]
                     repo.update_file_category(db_file_id, category_names, is_verified=False)
@@ -260,23 +299,61 @@ def process_document_task(user_id: str, file_path: str, title: str, file_id: str
             chunks.append(text_content[i:i + chunk_size])
 
         success_count = 0
-        for i, chunk in enumerate(chunks):
-            meta = {
-                "file_id": file_id,
-                "title": title,
-                "chunk_index": i,
-                "source": "uploaded_file",
-                "all_categories": [c["name"] for c in detected_categories] # メタデータにも全カテゴリを残す
-            }
 
-            if km.add_user_memory(
-                user_id=user_id,
-                content=chunk,
-                memory_type="document_chunk",
-                category=primary_category,
-                meta=meta
-            ):
+        # --- 修正開始: 新しい保存ロジック ---
+        for i, chunk in enumerate(chunks):
+            chunk_id = str(uuid.uuid4())
+
+            # 1. Embedding生成
+            vector = km.ai_client.get_embedding(chunk)
+            if not vector:
+                continue
+
+            # 2. Qdrant (Vector DB) へ保存
+            # DocumentChunkとして保存し、検索可能にする
+            payload = {
+                "user_id": user_id,
+                "category": primary_category,
+                "type": "document_chunk",
+                "visibility": "private",
+                "content": chunk,
+                "meta": {
+                    "file_id": file_id,
+                    "title": title,
+                    "chunk_index": i,
+                    "source": "uploaded_file"
+                }
+            }
+            try:
+                km._setup_qdrant_collection()
+                km.qdrant_client.upsert(
+                    collection_name=km.collection_name,
+                    points=[PointStruct(id=chunk_id, vector=vector, payload=payload)]
+                )
+            except Exception as e:
+                logger.error(f"Qdrant upsert failed: {e}")
+                continue
+
+            # 3. Graph (Structure) へ保存
+            try:
+                # Chunkノードを作成
+                km.graph_manager.add_chunk(
+                    text=chunk,
+                    evidence_ids=[chunk_id],
+                    properties={"index": i, "file_id": file_id}
+                )
+
+                # Fileノードにリンク (DocumentChunk -[PART_OF]-> Document)
+                # ※ title は add_document で作成した text と一致させる必要があります
+                km.graph_manager.link_chunk_to_document(
+                    chunk_text=chunk,
+                    file_node_text=title,
+                    rel_type="PART_OF"
+                )
                 success_count += 1
+            except Exception as e:
+                logger.error(f"Graph update failed for chunk {i}: {e}")
+        # --- 修正終了 -----------------------
 
         logger.info(f"Processed {success_count} chunks for {title}")
         return {"status": "completed", "chunks_processed": success_count}
