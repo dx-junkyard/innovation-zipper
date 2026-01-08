@@ -408,8 +408,10 @@ def render_graph_view():
                                 data = res.json()
                                 raw_signed_url = data.get("url")
                                 if raw_signed_url:
-                                    # Replace internal Docker URL with Public Browser URL dynamically
-                                    pdf_url = raw_signed_url.replace(settings.S3_ENDPOINT_URL, settings.S3_PUBLIC_ENDPOINT_URL)
+                                    # 削除: 文字列置換ロジックは不要になりました
+                                    # if pdf_url:
+                                    #    pdf_url = pdf_url.replace(settings.S3_ENDPOINT_URL, settings.S3_PUBLIC_ENDPOINT_URL)
+                                    pdf_url = raw_signed_url
                                 else:
                                     st.warning("File URL not found in API response.")
                             else:

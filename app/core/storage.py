@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 
 class StorageClient:
     def __init__(self):
+        # 1. 内部操作用クライアント (Dockerネットワーク内の通信用: http://minio:9000)
         self.s3_client = boto3.client(
             "s3",
             endpoint_url=settings.S3_ENDPOINT_URL,
@@ -17,6 +18,19 @@ class StorageClient:
             config=Config(signature_version="s3v4"),
             use_ssl=settings.S3_USE_SSL
         )
+
+        # 2. [追加] 署名生成専用クライアント (ブラウザ用URL: http://localhost:9000)
+        # これを使わないと、Hostヘッダーの不一致で署名エラーになります
+        self.signer_client = boto3.client(
+            "s3",
+            endpoint_url=settings.S3_PUBLIC_ENDPOINT_URL,
+            aws_access_key_id=settings.S3_ACCESS_KEY,
+            aws_secret_access_key=settings.S3_SECRET_KEY,
+            region_name=settings.S3_REGION_NAME,
+            config=Config(signature_version="s3v4"),
+            use_ssl=settings.S3_USE_SSL
+        )
+
         self.bucket_name = settings.S3_BUCKET_NAME
         self._ensure_bucket()
 
@@ -47,7 +61,8 @@ class StorageClient:
 
     def generate_presigned_url(self, object_name: str, expiration: int = 300) -> str:
         try:
-            url = self.s3_client.generate_presigned_url(
+            # 修正: self.signer_client を使用してURLを生成する
+            url = self.signer_client.generate_presigned_url(
                 "get_object",
                 Params={"Bucket": self.bucket_name, "Key": object_name},
                 ExpiresIn=expiration
