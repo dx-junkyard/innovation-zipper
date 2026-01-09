@@ -298,22 +298,17 @@ class GraphManager:
         """
         if not self.driver: return {"nodes": [], "edges": []}
 
-        # 特定のユーザーに関連するグラフ内でのみ探索するように制約をかける
-        # (他人のデータや無関係なパブリックデータが混ざらないように)
+        # [FIX] id()関数をelementId()に置き換えて警告を解消
+        # elementId()はNeo4j 5.x以降で推奨される一意な識別子取得関数です
         query = f"""
         MATCH (u:{self.LABEL_USER} {{id: $user_id}})
         MATCH (center) WHERE center.name = $node_id
 
-        // ユーザーのグラフに関連しているか確認（パスが存在するか）
-        // ※厳密すぎると出ない場合があるので、一旦center起点で探索し、
-        //   必要であればユーザーフィルタを追加する方針でも可。
-        //   ここではシンプルに center と隣接ノードを取得。
-
         MATCH (center)-[r]-(neighbor)
         RETURN
-            {{id: coalesce(center.name, center.text, toString(id(center))), label: coalesce(center.name, center.text, "No Label"), labels: labels(center), properties: properties(center)}} as center_node,
-            {{source: coalesce(startNode(r).name, startNode(r).text, toString(id(startNode(r)))), target: coalesce(endNode(r).name, endNode(r).text, toString(id(endNode(r)))), label: type(r)}} as edge_data,
-            {{id: coalesce(neighbor.name, neighbor.text, toString(id(neighbor))), label: coalesce(neighbor.name, neighbor.text, "No Label"), labels: labels(neighbor), properties: properties(neighbor)}} as neighbor_node
+            {{id: coalesce(center.name, center.text, elementId(center)), label: coalesce(center.name, center.text, "No Label"), labels: labels(center), properties: properties(center)}} as center_node,
+            {{source: coalesce(startNode(r).name, startNode(r).text, elementId(startNode(r))), target: coalesce(endNode(r).name, endNode(r).text, elementId(endNode(r))), label: type(r)}} as edge_data,
+            {{id: coalesce(neighbor.name, neighbor.text, elementId(neighbor)), label: coalesce(neighbor.name, neighbor.text, "No Label"), labels: labels(neighbor), properties: properties(neighbor)}} as neighbor_node
         LIMIT 50
         """
 
