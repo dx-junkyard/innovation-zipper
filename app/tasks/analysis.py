@@ -270,14 +270,19 @@ def process_document_task(user_id: str, file_path: str, title: str, file_id: str
                     properties={"title": title, "summary": f"Uploaded file: {title}"}
                 )
 
-                if primary_category and primary_category != "Uncategorized":
-                    km.graph_manager.link_document_to_concept(
-                        document_text=title,
-                        concept_name=primary_category,
-                        rel_type="BELONGS_TO"
-                    )
+                # Link to ALL detected categories
+                linked_categories = []
+                for cat in detected_categories:
+                    cat_name = cat.get("name")
+                    if cat_name and cat_name not in ["Uncategorized", "General"]:
+                        km.graph_manager.link_document_to_concept(
+                            document_text=title,
+                            concept_name=cat_name,
+                            rel_type="BELONGS_TO"
+                        )
+                        linked_categories.append(cat_name)
 
-                logger.info(f"Created File Node for {title} linked to {primary_category}")
+                logger.info(f"Created File Node for {title} linked to {linked_categories}")
 
                 # 3. Update File Categories in MySQL
                 if db_file_id:

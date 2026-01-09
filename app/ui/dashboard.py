@@ -252,6 +252,14 @@ def render_innovation_zipper(analysis_data):
 
     st.graphviz_chart(graph)
 
+def format_node_label(text: str, max_width: int = 15, max_lines: int = 2) -> str:
+    if not text:
+        return ""
+    words = [text[i:i+max_width] for i in range(0, len(text), max_width)]
+    if len(words) > max_lines:
+        return "\n".join(words[:max_lines]) + "..."
+    return "\n".join(words)
+
 def merge_graph_data(current_nodes, current_edges, new_data, node_styles):
     """既存のグラフデータに新しいデータをマージするヘルパー関数"""
     existing_ids = {n.id for n in current_nodes}
@@ -280,16 +288,43 @@ def merge_graph_data(current_nodes, current_edges, new_data, node_styles):
             color = n.get("color") or style["color"]
             size = n.get("size") or style["size"]
 
-            current_nodes.append(Node(
-                id=n["id"],
-                label=n["label"],
-                size=size,
-                color=color,
-                shape=style.get("shape", "dot"),
-                title=n.get("label"),
-                type=node_type,
-                properties=n.get("properties", {})
-            ))
+            # プロパティから画像URLを取得
+            raw_image_url = n.get("properties", {}).get("image")
+
+            # [Fix] 画像URLの検証を厳格化 (文字列かつ http または / で始まるもののみ許可)
+            # これを行わないと、ラベル名などが画像パスとして誤解釈され、404エラー(read error)を引き起こす
+            is_valid_image = isinstance(raw_image_url, str) and (raw_image_url.startswith("http") or raw_image_url.startswith("/"))
+
+            if is_valid_image:
+                node_shape = "image"
+                image_path = raw_image_url
+            else:
+                node_shape = style.get("shape", "dot")
+                image_path = None
+
+            # [Fix] フロントエンドに渡すプロパティのサニタイズ
+            # imageキーが残っていると vis.js が混乱する場合があるため除外して渡す
+            safe_properties = n.get("properties", {}).copy()
+            if "image" in safe_properties:
+                del safe_properties["image"]
+
+            # ノードのパラメータを辞書で構築
+            node_config = {
+                "id": n["id"],
+                "label": format_node_label(n["label"]),
+                "size": size,
+                "color": color,
+                "shape": node_shape,
+                "title": n.get("label"),
+                "type": node_type,
+                "properties": safe_properties # [Fix] サニタイズ済みプロパティを使用
+            }
+
+            # 画像がある場合のみ image キーを追加
+            if image_path:
+                node_config["image"] = image_path
+
+            current_nodes.append(Node(**node_config))
             existing_ids.add(n["id"])
 
     for e in new_data.get("edges", []):
@@ -318,12 +353,16 @@ def render_graph_view():
         "Document": {"color": "#95A5A6", "size": 20, "shape": "box"}
     }
 
-    # 1. Session Stateの初期化
-    if "graph_nodes" not in st.session_state:
+    # 1. キャッシュの強制クリアと初期化
+    if "graph_version" not in st.session_state or st.session_state["graph_version"] != "v2":
+        # データ構造が変わったためリセット
         st.session_state["graph_nodes"] = []
         st.session_state["graph_edges"] = []
         st.session_state["expanded_nodes"] = set()
+        st.session_state["graph_version"] = "v2" # バージョン更新
+        st.session_state["last_clicked_node_id"] = None # クリック状態もリセット
 
+    if not st.session_state["graph_nodes"]:
         init_data = fetch_knowledge_graph(user_id)
         if init_data:
             st.session_state["graph_nodes"], st.session_state["graph_edges"] = merge_graph_data(
@@ -340,7 +379,12 @@ def render_graph_view():
         nodeHighlightBehavior=True,
         highlightColor="#F7A7A6",
         collapsible=False,
-        node={"labelProperty": "label"},
+        groups={},  # [Fix] 空のgroups定義を追加して警告を抑制
+        node={
+            "labelProperty": "label",
+            "renderLabel": True,
+            "shape": "dot"
+        },
         link={"labelProperty": "type", "renderLabel": False}
     )
 
@@ -353,7 +397,34 @@ def render_graph_view():
     )
 
     # 3. インタラクション処理
+    # 状態変数の初期化
+    if "last_clicked_node_id" not in st.session_state:
+        st.session_state["last_clicked_node_id"] = None
+
     if selected_node_id:
+        # --- インタラクションロジック ---
+
+        # [FIX] 無限ループの原因となるため、自動Focusロジックを削除
+        # 以前のコード:
+        # if selected_node_id == st.session_state["last_clicked_node_id"]:
+        #     ... st.rerun() ...
+
+        # 新しいノードをクリック -> Expand Mode (展開)
+        if selected_node_id != st.session_state["last_clicked_node_id"]:
+            # 状態更新
+            st.session_state["last_clicked_node_id"] = selected_node_id
+
+            # まだグラフに含まれていない隣接情報を追加
+            with st.spinner(f"📡 {selected_node_id} の関連情報を展開中..."):
+                neighbors = fetch_neighbors(user_id, selected_node_id)
+                st.session_state["graph_nodes"], st.session_state["graph_edges"] = merge_graph_data(
+                    st.session_state["graph_nodes"],
+                    st.session_state["graph_edges"],
+                    neighbors,
+                    NODE_STYLES
+                )
+                st.rerun()
+
         # 選択されたノードオブジェクトを探す
         selected_node = next((n for n in st.session_state["graph_nodes"] if n.id == selected_node_id), None)
 
@@ -366,22 +437,20 @@ def render_graph_view():
                 st.header(f"Selected: {selected_node.label}")
                 st.markdown(f"Type: **{node_type}**")
 
+                # [FIX] Focus機能をボタンとして実装（ループ回避のため）
+                if st.button("🎯 このノードに集中する (Focus)"):
+                    with st.spinner(f"🎯 {selected_node_id} に集中しています..."):
+                        neighbors = fetch_neighbors(user_id, selected_node_id)
+                        # 既存データを破棄して入れ替え
+                        st.session_state["graph_nodes"], st.session_state["graph_edges"] = merge_graph_data(
+                            [], [], neighbors, NODE_STYLES
+                        )
+                        st.rerun()
+
                 # A. Hubの場合: 展開/収納
                 if node_type in ["Concept", "Category"]:
                     if selected_node_id in st.session_state["expanded_nodes"]:
                         st.success("展開済み (Expanded)")
-                    else:
-                        if st.button("📡 関連情報を展開する (Expand)", key=f"expand_{selected_node_id}"):
-                            with st.spinner("関連情報を取得中..."):
-                                neighbors = fetch_neighbors(user_id, selected_node_id)
-                                st.session_state["graph_nodes"], st.session_state["graph_edges"] = merge_graph_data(
-                                    st.session_state["graph_nodes"],
-                                    st.session_state["graph_edges"],
-                                    neighbors,
-                                    NODE_STYLES
-                                )
-                                st.session_state["expanded_nodes"].add(selected_node_id)
-                                st.rerun()
 
                 # B. Leafの場合: 詳細表示
                 elif node_type == "Hypothesis":
