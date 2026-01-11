@@ -343,7 +343,8 @@ async def post_usermessage_stream(request: Request) -> StreamingResponse:
         yield json.dumps({
             "type": "result",
             "message": bot_message,
-            "interest_profile": final_state.get("interest_profile")
+            "interest_profile": final_state.get("interest_profile"),
+            "analysis_log": final_state.get("last_analysis_log")
         }, ensure_ascii=False) + "\n"
 
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")

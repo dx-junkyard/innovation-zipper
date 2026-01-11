@@ -61,6 +61,7 @@ class GraphState(TypedDict):
     structural_analysis: Optional[Dict[str, Any]]
     idea_variants: Optional[Dict[str, Any]]
     innovation_hypotheses: Optional[List[Dict[str, Any]]]
+    last_analysis_log: Optional[Dict[str, Any]]
 
 class WorkflowManager:
     """
@@ -173,7 +174,8 @@ class WorkflowManager:
         # 次のターンのRouterでユーザーの同意があればモードが変わる運用。
         return {
             "bot_message": result["bot_message"],
-            "mode": result.get("suggested_mode", "discovery") # 次のターンのデフォルトとして保存
+            "mode": result.get("suggested_mode", "discovery"), # 次のターンのデフォルトとして保存
+            "last_analysis_log": result.get("analysis_log")
         }
 
     # Research Nodes
