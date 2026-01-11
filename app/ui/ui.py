@@ -70,6 +70,15 @@ class ChatUI:
                             status_placeholder.update(label=data["message"])
                         elif data["type"] == "result":
                             reply_text = data["message"]
+
+                            # メインのメッセージを表示
+                            st.markdown(self._format_message(reply_text))
+
+                            # 追加: 分析データがあれば折りたたみで表示（チャットログを汚さない）
+                            if data.get("analysis_log"):
+                                with st.expander("🤖 思考プロセス (分析データ)"):
+                                    st.json(data["analysis_log"])
+
                             if "interest_profile" in data:
                                 st.session_state.current_profile = data["interest_profile"]
                             status_placeholder.update(label="完了しました！", state="complete", expanded=False)
@@ -79,7 +88,8 @@ class ChatUI:
                     logger.error(traceback.format_exc())
                     reply_text = f"エラーが発生しました: {e}"
 
-                st.markdown(self._format_message(reply_text))
+                    # エラー時のみここで表示（成功時は上で表示済み）
+                    st.markdown(self._format_message(reply_text))
 
             st.session_state.messages.append({"role": "assistant", "content": reply_text})
 

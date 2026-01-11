@@ -26,6 +26,12 @@
 
 # Output Format (JSON)
 {
-  "bot_message": "ユーザーへの返答の全内容をここに記述してください。JSONの外には何も出力しないでください。",
+  "bot_message": "ユーザーへの返答の全内容をここに記述してください。分析結果やスコアはここには含めないでください。",
+  "analysis_log": {
+      "immersion_score": "1-10",
+      "truth_score": "1-10",
+      "reasoning": "評価の理由",
+      "next_steering_idea": "次の誘導案"
+  },
   "suggested_next_mode": "discovery" | "innovation" | "research"
 }
