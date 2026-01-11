@@ -245,9 +245,9 @@ def process_document_task(user_id: str, file_path: str, title: str, file_id: str
         # ---------------------------------------------------------
         # [New Logic] Graph Update: Create File Node & Link to Categories
         # ---------------------------------------------------------
-        if detected_categories:
-            try:
-                # 1. Update Graph (Categories)
+        try:
+            # 1. Update Graph (Categories)
+            if detected_categories:
                 for cat in detected_categories:
                     km.graph_manager.add_category_and_keywords(
                         user_id=user_id,
@@ -257,21 +257,18 @@ def process_document_task(user_id: str, file_path: str, title: str, file_id: str
                         source_type="document_analysis"
                     )
 
-                # 2. Create File Node (Document) linked to Primary Category
-                # The prompt says link to "category", usually primary.
-                # We can also link to all detected categories if needed, but let's stick to primary for now to avoid clutter,
-                # or link to all. Let's link to primary.
+            # 2. Create File Node (Document)
+            file_url = f"/api/v1/user-files/{file_id}/content"
+            km.graph_manager.add_document(
+                text=title,
+                file_id=file_id,
+                url=file_url,
+                properties={"title": title, "summary": f"Uploaded file: {title}"}
+            )
 
-                file_url = f"/api/v1/user-files/{file_id}/content"
-                km.graph_manager.add_document(
-                    text=title,
-                    file_id=file_id,
-                    url=file_url,
-                    properties={"title": title, "summary": f"Uploaded file: {title}"}
-                )
-
-                # Link to ALL detected categories
-                linked_categories = []
+            # Link to ALL detected categories
+            linked_categories = []
+            if detected_categories:
                 for cat in detected_categories:
                     cat_name = cat.get("name")
                     if cat_name and cat_name not in ["Uncategorized", "General"]:
@@ -282,16 +279,66 @@ def process_document_task(user_id: str, file_path: str, title: str, file_id: str
                         )
                         linked_categories.append(cat_name)
 
-                logger.info(f"Created File Node for {title} linked to {linked_categories}")
+            logger.info(f"Created File Node for {title} linked to {linked_categories}")
 
-                # 3. Update File Categories in MySQL
-                if db_file_id:
-                    category_names = [c["name"] for c in detected_categories]
-                    repo.update_file_category(db_file_id, category_names, is_verified=False)
-                    logger.info(f"Updated MySQL user_files categories for file {db_file_id}: {category_names}")
+            # 3. Keyword Extraction & Filtering
+            extracted_keywords = []
+            try:
+                # Load blocklist from categories.json
+                blocklist = set()
+                categories_path = os.path.join(os.path.dirname(__file__), "../../topic-service/categories.json")
+                if os.path.exists(categories_path):
+                    with open(categories_path, 'r', encoding='utf-8') as f:
+                        cats_data = json.load(f)
+                        for main_cat, data in cats_data.items():
+                            blocklist.add(main_cat)
+                            for sub in data.get("subcategories", []):
+                                blocklist.add(sub.get("category"))
+
+                # LLM Extraction
+                prompt_path = os.path.join(os.path.dirname(__file__), "../static/prompts/keyword_extraction.txt")
+                with open(prompt_path, 'r') as f:
+                    keyword_prompt_template = f.read()
+
+                # Use the first 2000 chars or so for extraction
+                keyword_prompt = keyword_prompt_template.replace("{text}", text_content[:2000])
+                kw_result = km.ai_client.generate_json(keyword_prompt) # Use existing AI client from KM
+
+                raw_keywords = kw_result.get("keywords", []) if kw_result else []
+
+                # Filter keywords
+                extracted_keywords = [
+                    k for k in raw_keywords
+                    if k not in blocklist and len(k) > 1
+                ]
+
+                logger.info(f"Extracted Keywords for {title}: {extracted_keywords}")
+
+                # Link to Document in Graph
+                for kw in extracted_keywords:
+                    km.graph_manager.link_document_to_keyword(
+                        document_text=title,
+                        keyword=kw,
+                        rel_type="TAGGED_WITH"
+                    )
 
             except Exception as e:
-                logger.error(f"Failed to update Interest Graph or DB: {e}")
+                logger.error(f"Keyword extraction failed: {e}")
+
+            # 4. Update File Categories & Keywords in MySQL
+            if db_file_id:
+                category_names = [c["name"] for c in detected_categories] if detected_categories else []
+                # Use the new method signature allowing keywords
+                repo.update_file_category(
+                    file_id=db_file_id,
+                    categories=category_names,
+                    is_verified=False,
+                    keywords=extracted_keywords
+                )
+                logger.info(f"Updated MySQL user_files categories/keywords for file {db_file_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to update Interest Graph or DB: {e}")
 
         # ---------------------------------------------------------
         # Chunking & Saving (Existing Logic with updates)

@@ -73,8 +73,8 @@ def fetch_all_user_contents(user_id):
         st.error(f"コンテンツ取得エラー: {e}")
         return []
 
-def send_content_feedback(user_id, content_id, content_type, new_categories, text_to_learn=None):
-    """コンテンツのカテゴリフィードバックを送信"""
+def send_content_feedback(user_id, content_id, content_type, new_categories, new_keywords=None, text_to_learn=None):
+    """コンテンツのカテゴリ・キーワードフィードバックを送信"""
     try:
         base_url = get_base_url()
         target_url = f"{base_url}/feedback/content"
@@ -84,6 +84,7 @@ def send_content_feedback(user_id, content_id, content_type, new_categories, tex
             "content_id": content_id,
             "content_type": content_type,
             "new_categories": new_categories,
+            "new_keywords": new_keywords,
             "text_to_learn": text_to_learn
         }
         resp = requests.post(target_url, json=payload)
@@ -112,6 +113,10 @@ def category_edit_dialog(item, category_data, user_id):
     if isinstance(current_cats, str):
         current_cats = [current_cats]
 
+    current_keywords = item.get('keywords', [])
+    if isinstance(current_keywords, str): # Fallback if API returns string
+        current_keywords = [current_keywords]
+
     # 既存カテゴリから初期選択状態を推測するのは少し難しいが、単純にサブカテゴリ名マッチで探す
     # ここではユーザーがゼロから選び直すUIとする（既存カテゴリは参考表示）
     st.caption(f"現在のカテゴリ: {', '.join(current_cats)}")
@@ -128,16 +133,32 @@ def category_edit_dialog(item, category_data, user_id):
         for s in subs:
             available_subs.append(s["category"])
 
-    selected_subs = st.multiselect("サブカテゴリを選択（最終的なタグになります）", available_subs)
+    selected_subs = st.multiselect("サブカテゴリを選択（最終的なタグになります）", available_subs, default=[])
+
+    st.divider()
+
+    # 3. キーワード編集
+    st.markdown("##### 🔑 固有キーワード")
+    st.caption("カンマ区切りで入力してください (例: React, マイクロサービス, Docker)")
+    keyword_input = st.text_area("キーワード", value=", ".join(current_keywords))
 
     if st.button("保存して更新"):
-        if selected_subs:
-             text_to_learn = f"{item['title']} {item.get('source', '')}"
-             if send_content_feedback(user_id, item['id'], item['type'], selected_subs, text_to_learn):
+        # キーワード処理
+        new_keywords = [k.strip() for k in keyword_input.split(",") if k.strip()]
+
+        # カテゴリ処理（もし何も選ばれていない場合、既存を維持するか、警告するか。ここでは必須ではないとするが、できれば入力推奨）
+        # もしselected_subsが空なら、既存のカテゴリを引き継ぐロジックを入れるか、
+        # ユーザーが意図的にクリアしたい場合もあるので、空リストを送る。
+
+        text_to_learn = f"{item['title']} {item.get('source', '')}"
+
+        # カテゴリが空でもキーワードがあればOKとする
+        if selected_subs or new_keywords:
+             if send_content_feedback(user_id, item['id'], item['type'], selected_subs, new_keywords, text_to_learn):
                  st.success("更新しました！")
                  st.rerun()
         else:
-            st.warning("少なくとも1つのサブカテゴリを選択してください。")
+            st.warning("カテゴリまたはキーワードを入力してください。")
 
 @st.dialog("カテゴリ編集")
 def open_category_dialog(item, category_data, user_id):
@@ -176,7 +197,7 @@ def render_data_management_tab():
 
             cols[0].markdown(f"{icon} **{item['title']}**\n\n<span style='color:gray; font-size:0.8em'>{source_display}</span>", unsafe_allow_html=True)
 
-            # 2. Current Category (Tags)
+            # 2. Current Category (Tags) & Keywords
             is_verified = item.get("is_verified", False)
             status_icon = "✅" if is_verified else "❓"
 
@@ -184,9 +205,17 @@ def render_data_management_tab():
             if isinstance(categories, str): # Fallback
                 categories = [categories]
 
+            keywords = item.get('keywords', [])
+            if isinstance(keywords, str):
+                keywords = [keywords]
+
             # Simple badge-like display
             cat_html = " ".join([f"<span style='background-color:#E8F8F5; color:#148F77; padding:2px 8px; border-radius:12px; font-size:0.8em; margin-right:4px;'>{c}</span>" for c in categories])
-            cols[1].markdown(f"{status_icon} {cat_html}", unsafe_allow_html=True)
+
+            # Hashtag style for keywords
+            kw_html = " ".join([f"<span style='color:#5D6D7E; font-size:0.8em; margin-right:4px;'>#{k}</span>" for k in keywords])
+
+            cols[1].markdown(f"{status_icon} {cat_html}<br>{kw_html}", unsafe_allow_html=True)
 
             # 3. Action
             if cols[2].button("編集", key=f"edit_{item['id']}_{item['type']}"):

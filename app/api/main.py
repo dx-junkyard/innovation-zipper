@@ -489,6 +489,7 @@ class ContentFeedbackRequest(BaseModel):
     content_id: int
     content_type: str # 'file' or 'capture'
     new_categories: List[str]
+    new_keywords: Optional[List[str]] = None
     text_to_learn: Optional[str] = None # Text content to use for learning
 
 class ConversationFeedbackRequest(BaseModel):
@@ -504,7 +505,12 @@ async def feedback_content(request: ContentFeedbackRequest):
 
     # 1. Update Database
     if request.content_type == 'file':
-        success = repo.update_file_category(request.content_id, request.new_categories, is_verified=True)
+        success = repo.update_file_category(
+            file_id=request.content_id,
+            categories=request.new_categories,
+            is_verified=True,
+            keywords=request.new_keywords
+        )
     elif request.content_type == 'capture':
         # Backward compatibility for captures (single category)
         primary_category = request.new_categories[0] if request.new_categories else "Uncategorized"
@@ -523,13 +529,27 @@ async def feedback_content(request: ContentFeedbackRequest):
                 text_snippet = request.text_to_learn[:500]
                 topic_client.learn_text(text_snippet, cat)
 
-            # 3. Update Knowledge Graph
+            # 3. Update Knowledge Graph (Categories)
             graph_manager.add_user_interest(
                 user_id=request.user_id,
                 concept_name=cat,
                 confidence=1.0,
                 source_type=graph_manager.SOURCE_USER_STATED
             )
+
+    # 4. Update Graph with Keywords (if provided and file type)
+    if request.content_type == 'file' and request.new_keywords:
+        # We need the file title to link keyword to document
+        file_info = repo.get_file_by_id(request.content_id)
+        if file_info:
+            title = file_info.get("title")
+            if title:
+                for kw in request.new_keywords:
+                    graph_manager.link_document_to_keyword(
+                        document_text=title,
+                        keyword=kw,
+                        rel_type="TAGGED_WITH"
+                    )
 
     return {"status": "success", "message": "Content updated and learned."}
 
