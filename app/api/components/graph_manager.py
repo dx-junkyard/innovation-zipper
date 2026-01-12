@@ -221,6 +221,22 @@ class GraphManager:
         except Exception as e:
             print(f"Error linking document to concept: {e}")
 
+    def link_document_to_keyword(self, document_text: str, keyword: str, rel_type: str = "TAGGED_WITH"):
+        """Links a Document (File) to a Keyword."""
+        if not self.driver: return
+
+        query = f"""
+        MATCH (d:{self.LABEL_DOCUMENT} {{text: $d_text}})
+        MERGE (k:{self.LABEL_KEYWORD} {{name: $keyword}})
+        MERGE (d)-[r:{rel_type}]->(k)
+        RETURN r
+        """
+        try:
+            with self.driver.session() as session:
+                session.run(query, d_text=document_text, keyword=keyword)
+        except Exception as e:
+            print(f"Error linking document to keyword: {e}")
+
     def link_chunk_to_document(self, chunk_text: str, file_node_text: str, rel_type: str = "PART_OF"):
         """Links a DocumentChunk to a Document."""
         if not self.driver: return
@@ -302,9 +318,10 @@ class GraphManager:
         # elementId()はNeo4j 5.x以降で推奨される一意な識別子取得関数です
         query = f"""
         MATCH (u:{self.LABEL_USER} {{id: $user_id}})
-        MATCH (center) WHERE center.name = $node_id
+        MATCH (center) WHERE center.name = $node_id OR center.text = $node_id
 
         MATCH (center)-[r]-(neighbor)
+        WHERE NOT "DocumentChunk" IN labels(neighbor)
         RETURN
             {{id: coalesce(center.name, center.text, elementId(center)), label: coalesce(center.name, center.text, "No Label"), labels: labels(center), properties: properties(center)}} as center_node,
             {{source: coalesce(startNode(r).name, startNode(r).text, elementId(startNode(r))), target: coalesce(endNode(r).name, endNode(r).text, elementId(endNode(r))), label: type(r)}} as edge_data,

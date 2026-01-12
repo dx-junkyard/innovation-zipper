@@ -17,7 +17,8 @@ class InterestExplorer:
 
         result = {
             "bot_message": "...",
-            "suggested_mode": "discovery"
+            "suggested_mode": "discovery",
+            "analysis_log": {}
         }
 
         if response:
@@ -26,6 +27,8 @@ class InterestExplorer:
             if "suggested_next_mode" in response:
                  # "discovery" 以外が提案された場合、その意図を保持する
                  result["suggested_mode"] = response["suggested_next_mode"]
+            if "analysis_log" in response:
+                result["analysis_log"] = response["analysis_log"]
 
         return result
 

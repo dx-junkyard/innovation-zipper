@@ -67,6 +67,25 @@ class DBClient:
             if cursor: cursor.close()
             if conn: conn.close()
 
+    def get_file_by_id(self, file_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Retrieves file info by Primary Key ID.
+        """
+        conn = None
+        cursor = None
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor(dictionary=True)
+            query = "SELECT id, user_id, file_path, is_public, title FROM user_files WHERE id = %s"
+            cursor.execute(query, (file_id,))
+            return cursor.fetchone()
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in get_file_by_id: {err}")
+            return None
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
     def check_file_exists(self, user_id: str, file_hash: str) -> bool:
         """
         Check if the file already exists for the user or is public.
@@ -550,9 +569,65 @@ class DBClient:
                 if cursor: cursor.close()
                 if conn: conn.close()
 
-    def update_file_category(self, file_id: int, categories: List[str], is_verified: bool = True) -> bool:
+    def add_file_keywords(self, file_id: int, keywords: List[str], conn=None, cursor=None) -> bool:
+        """Adds keywords to a file."""
+        if not keywords:
+            return True
+
+        local_conn = False
+        if not conn:
+            try:
+                conn = mysql.connector.connect(**self.config)
+                cursor = conn.cursor()
+                local_conn = True
+            except mysql.connector.Error as err:
+                print(f"[✗] MySQL Error in add_file_keywords connection: {err}")
+                return False
+
+        try:
+            query = "INSERT IGNORE INTO file_keywords (file_id, keyword) VALUES (%s, %s)"
+            data = [(file_id, kw) for kw in keywords]
+            cursor.executemany(query, data)
+            if local_conn:
+                conn.commit()
+            return True
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in add_file_keywords: {err}")
+            return False
+        finally:
+            if local_conn:
+                if cursor: cursor.close()
+                if conn: conn.close()
+
+    def delete_file_keywords(self, file_id: int, conn=None, cursor=None) -> bool:
+        """Deletes all keywords for a file."""
+        local_conn = False
+        if not conn:
+            try:
+                conn = mysql.connector.connect(**self.config)
+                cursor = conn.cursor()
+                local_conn = True
+            except mysql.connector.Error as err:
+                print(f"[✗] MySQL Error in delete_file_keywords connection: {err}")
+                return False
+
+        try:
+            query = "DELETE FROM file_keywords WHERE file_id = %s"
+            cursor.execute(query, (file_id,))
+            if local_conn:
+                conn.commit()
+            return True
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in delete_file_keywords: {err}")
+            return False
+        finally:
+            if local_conn:
+                if cursor: cursor.close()
+                if conn: conn.close()
+
+    def update_file_category(self, file_id: int, categories: List[str], is_verified: bool = True, keywords: List[str] = None) -> bool:
         """
-        Updates categories for a file by deleting existing ones and inserting new ones.
+        Updates categories and keywords for a file by deleting existing ones and inserting new ones.
         Also marks the file as verified.
         Executes within a single transaction.
         """
@@ -560,8 +635,7 @@ class DBClient:
         cursor = None
         try:
             conn = mysql.connector.connect(**self.config)
-            # Start transaction (autocommit is False by default in mysql-connector if using transactions,
-            # but explicit start_transaction ensures it)
+            # Start transaction
             conn.start_transaction()
             cursor = conn.cursor()
 
@@ -570,7 +644,6 @@ class DBClient:
             cursor.execute(query_update, (is_verified, file_id))
 
             # 2. Update categories (Delete & Insert)
-            # Pass conn/cursor to reuse the transaction
             if not self.delete_file_categories(file_id, conn=conn, cursor=cursor):
                 conn.rollback()
                 return False
@@ -578,6 +651,15 @@ class DBClient:
             if not self.add_file_categories(file_id, categories, conn=conn, cursor=cursor):
                 conn.rollback()
                 return False
+
+            # 3. Update keywords (Delete & Insert) if provided
+            if keywords is not None:
+                if not self.delete_file_keywords(file_id, conn=conn, cursor=cursor):
+                    conn.rollback()
+                    return False
+                if not self.add_file_keywords(file_id, keywords, conn=conn, cursor=cursor):
+                    conn.rollback()
+                    return False
 
             conn.commit()
             return True
@@ -615,27 +697,37 @@ class DBClient:
             conn = mysql.connector.connect(**self.config)
             cursor = conn.cursor(dictionary=True)
 
-            # 1. Files (with aggregated categories)
-            # GROUP_CONCAT returns a comma-separated string of categories.
-            # Using LEFT JOIN to ensure files without categories are still returned.
+            # 1. Files (with aggregated categories and keywords)
+            # Using LEFT JOIN to ensure files without categories/keywords are still returned.
+            # We need subqueries or separate aggregations to avoid cross-product duplication issues with multiple GROUP_CONCATs
+            # But simple GROUP_CONCAT with DISTINCT usually works for simple 1:N relations.
+
             query_files = """
                 SELECT f.id, f.title, f.is_verified, f.created_at, 'file' as type, f.file_name as source,
-                       GROUP_CONCAT(fc.category_name) as category
+                       GROUP_CONCAT(DISTINCT fc.category_name) as category,
+                       GROUP_CONCAT(DISTINCT fk.keyword) as keywords
                 FROM user_files f
                 LEFT JOIN file_categories fc ON f.id = fc.file_id
+                LEFT JOIN file_keywords fk ON f.id = fk.file_id
                 WHERE f.user_id = %s
                 GROUP BY f.id
             """
             cursor.execute(query_files, (user_id,))
             files = cursor.fetchall()
 
-            # Post-process files: convert 'category' string to list
+            # Post-process files: convert 'category' and 'keywords' strings to list
             for f in files:
                 cat_str = f.get("category")
                 if cat_str:
                     f["category"] = cat_str.split(",")
                 else:
                     f["category"] = []
+
+                kw_str = f.get("keywords")
+                if kw_str:
+                    f["keywords"] = kw_str.split(",")
+                else:
+                    f["keywords"] = []
 
             contents.extend(files)
 

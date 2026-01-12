@@ -1,0 +1,10 @@
+Extract 5 to 10 specific keywords or technical terms from the document text provided below.
+The keywords should represent the specific content, entities, or unique topics of the document, rather than broad categories.
+
+# Constraints:
+- Extract 5-10 keywords.
+- Return ONLY a JSON object in the format: {"keywords": ["keyword1", "keyword2", ...]}.
+- Do not include broad categories like "Technology", "Business", "Health", etc. Focus on specific terms.
+
+# Document Text (Beginning):
+{text}
