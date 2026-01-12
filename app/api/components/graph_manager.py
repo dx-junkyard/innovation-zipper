@@ -321,6 +321,7 @@ class GraphManager:
         MATCH (center) WHERE center.name = $node_id OR center.text = $node_id
 
         MATCH (center)-[r]-(neighbor)
+        WHERE NOT "DocumentChunk" IN labels(neighbor)
         RETURN
             {{id: coalesce(center.name, center.text, elementId(center)), label: coalesce(center.name, center.text, "No Label"), labels: labels(center), properties: properties(center)}} as center_node,
             {{source: coalesce(startNode(r).name, startNode(r).text, elementId(startNode(r))), target: coalesce(endNode(r).name, endNode(r).text, elementId(endNode(r))), label: type(r)}} as edge_data,
