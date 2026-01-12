@@ -306,11 +306,19 @@ def process_document_task(user_id: str, file_path: str, title: str, file_id: str
 
                 raw_keywords = kw_result.get("keywords", []) if kw_result else []
 
-                # Filter keywords
-                extracted_keywords = [
-                    k for k in raw_keywords
-                    if k.lower() not in blocklist and len(k) > 1
-                ][:10]
+                # Filter keywords: Deduplicate and blocklist check (Case Insensitive)
+                unique_keywords = []
+                seen = set()
+
+                for k in raw_keywords:
+                    k_clean = k.strip()
+                    k_lower = k_clean.lower()
+
+                    if len(k_clean) > 1 and k_lower not in blocklist and k_lower not in seen:
+                        unique_keywords.append(k_clean)
+                        seen.add(k_lower)
+
+                extracted_keywords = unique_keywords[:10]
 
                 logger.info(f"Extracted Keywords for {title}: {extracted_keywords}")
 
