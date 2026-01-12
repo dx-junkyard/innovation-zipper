@@ -296,7 +296,7 @@ def process_document_task(user_id: str, file_path: str, title: str, file_id: str
                                 blocklist.add(sub.get("category"))
 
                 # LLM Extraction
-                prompt_path = os.path.join(os.path.dirname(__file__), "../../static/prompts/keyword_extraction.txt")
+                prompt_path = os.path.join(os.path.dirname(__file__), "../static/prompts/keyword_extraction.txt")
                 with open(prompt_path, 'r') as f:
                     keyword_prompt_template = f.read()
 
