@@ -362,14 +362,9 @@ async def chat_stream(request: ChatRequest):
             full_response = ""
 
             # Streaming text generation
-            # Note: ai_client.generate_stream is a synchronous generator, but we are in async function.
-            # In FastAPI/Starlette, synchronous iterables in StreamingResponse run in a separate thread.
-            # However, here we are inside an async generator 'event_generator'.
-            # It's better to iterate it directly. The loop will block the event loop slightly but for tokens it's usually fine or we accept it for now.
-            # Ideally we would run it in a threadpool if it blocks heavily, but network IO inside sync generator might block.
-            # Given existing architecture, we iterate directly.
+            # We use async generator here to prevent blocking the event loop
 
-            for token in ai_client.generate_stream(writing_prompt):
+            async for token in ai_client.generate_stream(writing_prompt):
                 if token:
                     full_response += token
                     yield f"data: {json.dumps({'type': 'token', 'content': token}, ensure_ascii=False)}\n\n"

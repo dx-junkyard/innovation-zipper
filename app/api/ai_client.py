@@ -2,10 +2,10 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional, Generator
+from typing import Any, Dict, List, Optional, Generator, AsyncGenerator
 
 import requests
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI
 
 from config import AI_URL, LLM_MODEL, EMBEDDING_MODEL
 
@@ -26,6 +26,7 @@ class AIClient:
         self.api_url = f"{base_url}/api/generate"
 
         self.openai_client = None
+        self.async_openai_client = None
         openai_api_key = os.environ.get("OPENAI_API_KEY")
 
         # Debug logging for API key status
@@ -41,6 +42,7 @@ class AIClient:
 
         if openai_api_key:
             self.openai_client = OpenAI(api_key=openai_api_key)
+            self.async_openai_client = AsyncOpenAI(api_key=openai_api_key)
             logger.info("AIClient initialized with OpenAI API")
         else:
             logger.info(
@@ -167,17 +169,17 @@ class AIClient:
         """
         return self.generate_response(prompt, model=model)
 
-    def generate_stream(self, prompt: str, model: Optional[str] = None) -> Generator[str, None, None]:
+    async def generate_stream(self, prompt: str, model: Optional[str] = None) -> AsyncGenerator[str, None]:
         """
         LLMを使用してストリーミング応答を生成する（テキスト生成用）。
         """
         target_model = model or self.model
         logger.info("Stream Prompt sent to LLM (Model: %s): %s", target_model, prompt)
 
-        if self.openai_client:
+        if self.async_openai_client:
             try:
                 # Use standard chat completion for streaming text
-                stream = self.openai_client.chat.completions.create(
+                stream = await self.async_openai_client.chat.completions.create(
                     model=target_model,
                     messages=[
                         {"role": "system", "content": "You are a helpful assistant."},
@@ -185,7 +187,7 @@ class AIClient:
                     ],
                     stream=True
                 )
-                for chunk in stream:
+                async for chunk in stream:
                     if chunk.choices and chunk.choices[0].delta.content:
                         yield chunk.choices[0].delta.content
             except Exception as exc:
