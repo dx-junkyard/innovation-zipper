@@ -18,7 +18,7 @@ from app.api.state_manager import StateManager
 from app.api.components.knowledge_manager import KnowledgeManager
 from app.api.components.graph_manager import GraphManager
 from app.api.components.topic_client import TopicClient
-from app.tasks.analysis import run_workflow_task, process_capture_task, process_document_task
+from app.tasks.analysis import run_workflow_task, process_capture_task, process_document_task, save_analysis_result_task
 from pydantic import BaseModel, Field, HttpUrl
 import requests
 import aiofiles
@@ -51,6 +51,10 @@ app.add_middleware(
 class LineAuthRequest(BaseModel):
     code: str
     redirect_uri: str
+
+class ChatRequest(BaseModel):
+    user_id: str
+    message: str
 
 # ログ設定
 logging.basicConfig(level=logging.INFO)
@@ -253,6 +257,143 @@ async def get_file_content(file_id: str):
         raise HTTPException(status_code=404, detail="File not found or S3 error")
 
     return {"url": url}
+
+@app.post("/api/v1/chat/stream")
+async def chat_stream(request: ChatRequest):
+    """
+    Server-Sent Events (SSE) streaming endpoint for True Streaming.
+    """
+    user_id = request.user_id
+    message = request.message
+
+    if not user_id or not message:
+         raise HTTPException(status_code=400, detail="Missing user_id or message")
+
+    ai_client = AIClient()
+    repo = DBClient()
+
+    # Store user message immediately
+    user_message_id = repo.insert_message(user_id, "user", message)
+    if not user_message_id:
+        raise HTTPException(status_code=500, detail="Failed to store user message")
+
+    workflow_manager = WorkflowManager(ai_client)
+
+    # Initialize State
+    history = repo.get_recent_conversation(user_id)
+    stored_state = repo.get_user_state(user_id)
+    current_state = StateManager.get_state_with_defaults(stored_state)
+
+    initial_state = StateManager.init_conversation_context(
+        user_message=message,
+        dialog_history=history,
+        interest_profile=current_state["interest_profile"],
+        active_hypotheses=current_state["active_hypotheses"]
+    )
+    initial_state["user_id"] = user_id
+
+    # Check for latest captured page context
+    latest_page = repo.get_latest_captured_page(user_id)
+    if latest_page:
+        initial_state["captured_page"] = latest_page
+
+    async def event_generator():
+        final_state = initial_state.copy()
+
+        # Friendly messages for step updates
+        node_messages = {
+            "situation_analysis": "状況を分析しています...",
+            "hypothesis_generation": "仮説を立てています...",
+            "rag_retrieval": "知識ベースを検索しています...",
+            "gap_analysis": "情報の不足を分析しています...",
+            "response_planning": "回答の方針を立てています...", # Updated message
+            "intent_router": "意図を理解しています...",
+            "discovery_exploration": "興味・関心を探索しています...",
+            "structural_analysis": "構造分析を行っています...",
+            "variant_generation": "アイデアのバリエーションを生成中...",
+            "innovation_synthesis": "イノベーション案を統合中...",
+            "report_generation": "レポートを作成中..."
+        }
+
+        try:
+            # --- Phase 1: Thinking (Step Streaming) ---
+            for step_output in workflow_manager.stream_invoke(initial_state):
+                for node_name, state_update in step_output.items():
+                    # Update final state
+                    final_state.update(state_update)
+
+                    # Yield step event
+                    msg = node_messages.get(node_name, f"処理中... ({node_name})")
+                    event_data = {
+                        "type": "step",
+                        "node": node_name,
+                        "content": msg
+                    }
+                    yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+
+            # --- Phase 2: Writing (Token Streaming) ---
+            # Yield event to indicate writing started
+            yield f"data: {json.dumps({'type': 'step', 'node': 'writing', 'content': '回答を執筆しています...'}, ensure_ascii=False)}\n\n"
+
+            response_plan = final_state.get("response_plan")
+
+            # Fallback if plan is missing or empty
+            if not response_plan:
+                plan_text = "特になし。ユーザーの質問に適切に答えてください。"
+            elif isinstance(response_plan, dict):
+                 plan_text = json.dumps(response_plan, ensure_ascii=False, indent=2)
+            else:
+                 plan_text = str(response_plan)
+
+            writing_prompt = f"""
+以下の回答方針（Response Plan）に基づいて、ユーザーへの回答を作成してください。
+
+# ユーザーの入力
+{message}
+
+# 回答方針
+{plan_text}
+
+# 制約
+- マークダウン形式で記述してください。
+- 方針に含まれる内容を網羅しつつ、自然な会話文にしてください。
+- 丁寧な口調で話しかけてください。
+"""
+            full_response = ""
+
+            # Streaming text generation
+            # We use async generator here to prevent blocking the event loop
+
+            async for token in ai_client.generate_stream(writing_prompt):
+                if token:
+                    full_response += token
+                    yield f"data: {json.dumps({'type': 'token', 'content': token}, ensure_ascii=False)}\n\n"
+
+            # Fallback if no response generated
+            if not full_response:
+                full_response = "申し訳ありません、回答の生成に失敗しました。"
+                yield f"data: {json.dumps({'type': 'token', 'content': full_response}, ensure_ascii=False)}\n\n"
+
+            # --- Completion ---
+            final_state["bot_message"] = full_response
+
+            complete_data = {
+                "type": "complete",
+                "bot_message": full_response, # Optional here since we streamed it, but good for final consistency
+                "analysis_log": final_state.get("last_analysis_log"),
+                "interest_profile": final_state.get("interest_profile")
+            }
+            yield f"data: {json.dumps(complete_data, ensure_ascii=False)}\n\n"
+
+            # Offload heavy saving to background task
+            save_analysis_result_task.delay(user_id, message, final_state, user_message_id)
+
+        except Exception as e:
+            logger.error(f"Stream error: {e}", exc_info=True)
+            error_data = {"type": "error", "message": str(e)}
+            yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.post("/api/v1/user-message-stream")
 async def post_usermessage_stream(request: Request) -> StreamingResponse:

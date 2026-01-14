@@ -157,6 +157,12 @@ class WorkflowManager:
         """
         return self.graph.invoke(initial_state)
 
+    def stream_invoke(self, initial_state: Dict[str, Any]):
+        """Executes the workflow and yields state updates."""
+        # stream_mode="updates" で各ノードの出力差分を取得
+        for event in self.graph.stream(initial_state, stream_mode="updates"):
+            yield event
+
     # --- Node Functions ---
 
     def _intent_router_node(self, state: GraphState) -> Dict[str, Any]:

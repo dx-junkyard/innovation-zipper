@@ -58,6 +58,33 @@ def run_workflow_task(user_id: str, message: str, user_message_id: Optional[str]
         final_state = workflow_manager.invoke(initial_state)
         bot_message = final_state.get("bot_message", "申し訳ありません、エラーが発生しました。")
 
+        # Offload heavy processing to background task
+        save_analysis_result_task.delay(user_id, message, final_state, user_message_id)
+
+        return {
+            "status": "success",
+            "bot_message": bot_message,
+            "task_id": run_workflow_task.request.id
+        }
+
+    except Exception as e:
+        logger.error(f"Error in workflow task for user_id={user_id}: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+
+@celery_app.task(name="save_analysis_result_task")
+def save_analysis_result_task(user_id: str, message: str, final_state: Dict[str, Any], user_message_id: Optional[str]):
+    """
+    Background task to save analysis results, update graphs, and trigger cache generation.
+    """
+    try:
+        # Initialize Clients
+        repo = DBClient()
+        knowledge_manager = KnowledgeManager()
+
+        # Extract bot_message if needed for logging/saving (though inserted here per requirements)
+        bot_message = final_state.get("bot_message", "")
+
         # --- Topic Service Integration ---
         try:
             topic_client = TopicClient()
@@ -84,7 +111,7 @@ def run_workflow_task(user_id: str, message: str, user_message_id: Optional[str]
         try:
             profile = final_state.get("interest_profile", {})
             categories = profile.get("categories", [])
-            current_category = profile.get("current_category") # Define current_category here
+            current_category = profile.get("current_category")
 
             # If no categories list, fallback to current_category (backward compatibility)
             if not categories and current_category:
@@ -139,22 +166,16 @@ def run_workflow_task(user_id: str, message: str, user_message_id: Optional[str]
             repo.record_analysis(user_id, user_message_id, analysis_to_save)
 
         # Insert AI message
-        repo.insert_message(user_id, "ai", bot_message)
+        if bot_message:
+            repo.insert_message(user_id, "ai", bot_message)
 
-        logger.info(f"Workflow task completed for user_id={user_id}. Bot message: {bot_message[:50]}...")
+        logger.info(f"Background analysis saved for user_id={user_id}.")
 
         # --- Trigger Hot Cache Generation ---
         generate_hot_cache_task.delay(user_id)
 
-        return {
-            "status": "success",
-            "bot_message": bot_message,
-            "task_id": run_workflow_task.request.id
-        }
-
     except Exception as e:
-        logger.error(f"Error in workflow task for user_id={user_id}: {e}", exc_info=True)
-        return {"status": "error", "error": str(e)}
+        logger.error(f"Error in save_analysis_result_task for user_id={user_id}: {e}", exc_info=True)
 
 
 @celery_app.task(name="process_document_task")
