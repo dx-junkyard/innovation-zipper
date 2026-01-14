@@ -18,7 +18,7 @@ from app.api.state_manager import StateManager
 from app.api.components.knowledge_manager import KnowledgeManager
 from app.api.components.graph_manager import GraphManager
 from app.api.components.topic_client import TopicClient
-from app.tasks.analysis import run_workflow_task, process_capture_task, process_document_task
+from app.tasks.analysis import run_workflow_task, process_capture_task, process_document_task, save_analysis_result_task
 from pydantic import BaseModel, Field, HttpUrl
 import requests
 import aiofiles
@@ -51,6 +51,10 @@ app.add_middleware(
 class LineAuthRequest(BaseModel):
     code: str
     redirect_uri: str
+
+class ChatRequest(BaseModel):
+    user_id: str
+    message: str
 
 # ログ設定
 logging.basicConfig(level=logging.INFO)
@@ -253,6 +257,100 @@ async def get_file_content(file_id: str):
         raise HTTPException(status_code=404, detail="File not found or S3 error")
 
     return {"url": url}
+
+@app.post("/api/v1/chat/stream")
+async def chat_stream(request: ChatRequest):
+    """
+    Server-Sent Events (SSE) streaming endpoint for True Streaming.
+    """
+    user_id = request.user_id
+    message = request.message
+
+    if not user_id or not message:
+         raise HTTPException(status_code=400, detail="Missing user_id or message")
+
+    ai_client = AIClient()
+    repo = DBClient()
+
+    # Store user message immediately
+    user_message_id = repo.insert_message(user_id, "user", message)
+    if not user_message_id:
+        raise HTTPException(status_code=500, detail="Failed to store user message")
+
+    workflow_manager = WorkflowManager(ai_client)
+
+    # Initialize State
+    history = repo.get_recent_conversation(user_id)
+    stored_state = repo.get_user_state(user_id)
+    current_state = StateManager.get_state_with_defaults(stored_state)
+
+    initial_state = StateManager.init_conversation_context(
+        user_message=message,
+        dialog_history=history,
+        interest_profile=current_state["interest_profile"],
+        active_hypotheses=current_state["active_hypotheses"]
+    )
+    initial_state["user_id"] = user_id
+
+    # Check for latest captured page context
+    latest_page = repo.get_latest_captured_page(user_id)
+    if latest_page:
+        initial_state["captured_page"] = latest_page
+
+    async def event_generator():
+        final_state = initial_state.copy()
+
+        # Friendly messages for step updates
+        node_messages = {
+            "situation_analysis": "状況を分析しています...",
+            "hypothesis_generation": "仮説を立てています...",
+            "rag_retrieval": "知識ベースを検索しています...",
+            "gap_analysis": "情報の不足を分析しています...",
+            "response_planning": "回答を作成しています...",
+            "intent_router": "意図を理解しています...",
+            "discovery_exploration": "興味・関心を探索しています...",
+            "structural_analysis": "構造分析を行っています...",
+            "variant_generation": "アイデアのバリエーションを生成中...",
+            "innovation_synthesis": "イノベーション案を統合中...",
+            "report_generation": "レポートを作成中..."
+        }
+
+        try:
+            # Execute workflow stream
+            for step_output in workflow_manager.stream_invoke(initial_state):
+                for node_name, state_update in step_output.items():
+                    # Update final state
+                    final_state.update(state_update)
+
+                    # Yield step event
+                    msg = node_messages.get(node_name, f"処理中... ({node_name})")
+                    event_data = {
+                        "type": "step",
+                        "node": node_name,
+                        "content": msg
+                    }
+                    yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+
+            # Yield completion event
+            bot_message = final_state.get("bot_message", "申し訳ありません、エラーが発生しました。")
+            complete_data = {
+                "type": "complete",
+                "bot_message": bot_message,
+                "analysis_log": final_state.get("last_analysis_log"),
+                "interest_profile": final_state.get("interest_profile")
+            }
+            yield f"data: {json.dumps(complete_data, ensure_ascii=False)}\n\n"
+
+            # Offload heavy saving to background task
+            # Ensure final_state is fully populated with what we have
+            save_analysis_result_task.delay(user_id, message, final_state, user_message_id)
+
+        except Exception as e:
+            logger.error(f"Stream error: {e}", exc_info=True)
+            error_data = {"type": "error", "message": str(e)}
+            yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.post("/api/v1/user-message-stream")
 async def post_usermessage_stream(request: Request) -> StreamingResponse:
