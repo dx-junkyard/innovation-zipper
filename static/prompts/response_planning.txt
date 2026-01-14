@@ -37,7 +37,7 @@ Construct a response that guides the user to the next best action.
 - Ask the user which action they want to proceed with.
 
 # Output Format
-Return a JSON object. The `message` field should contain the actual response text in Markdown format.
+Return a JSON object containing ONLY the response plan. DO NOT generate the final response text yet.
 
 {
   "response_plan": {
@@ -46,6 +46,5 @@ Return a JSON object. The `message` field should contain the actual response tex
     "proposed_actions": [
       {"action": "...", "type": "Low Cost", "rationale": "..."}
     ]
-  },
-  "message": "Markdown response text here..."
+  }
 }
