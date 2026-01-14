@@ -8,7 +8,6 @@ import streamlit as st
 try:
     from line_login_mock import ensure_login
 except ImportError:
-    # If running from root, might need this
     from app.ui.line_login_mock import ensure_login
 
 logger = logging.getLogger(__name__)
@@ -84,8 +83,13 @@ class ChatUI:
                                 status_placeholder.write(f"Executed: {data['node']}")
                                 status_placeholder.update(label=data.get("content", f"Processing {data['node']}..."))
 
+                            elif data["type"] == "token":
+                                reply_text += data["content"]
+                                message_placeholder.markdown(self._format_message(reply_text))
+
                             elif data["type"] == "complete":
-                                reply_text = data["bot_message"]
+                                if data.get("bot_message"):
+                                    reply_text = data["bot_message"]
                                 message_placeholder.markdown(self._format_message(reply_text))
 
                                 # 追加: 分析データがあれば折りたたみで表示

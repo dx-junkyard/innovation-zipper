@@ -30,12 +30,21 @@ class ResponsePlanner:
 
         result = self.ai_client.generate_response(prompt, model=MODEL_RESPONSE_PLANNING)
 
-        bot_message = "申し訳ありません、うまく応答を生成できませんでした。"
+        bot_message = None
         if result:
-            if isinstance(result, str):
-                bot_message = result
-            elif isinstance(result, dict):
-                 bot_message = result.get("message_text") or result.get("message") or str(result)
+            # Plan is stored in context["response_plan"] via workflow update
+            # But here we need to ensure the result is correctly parsed into the context structure expected by the caller or graph
+
+            # Since generate_response returns the JSON directly, we pass it back as the response_plan part of context
+            # We don't extract bot_message here anymore as it's generated later.
+
+            if isinstance(result, dict):
+                # Ensure the structure matches what workflow expects
+                if "response_plan" in result:
+                    context["response_plan"] = result["response_plan"]
+                else:
+                    # Fallback if LLM output structure varies slightly
+                    context["response_plan"] = result
 
         return context, bot_message
 

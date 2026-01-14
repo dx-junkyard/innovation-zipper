@@ -2,7 +2,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Generator
 
 import requests
 from openai import OpenAI
@@ -166,6 +166,51 @@ class AIClient:
         JSON形式の応答を生成する（generate_responseのエイリアス）。
         """
         return self.generate_response(prompt, model=model)
+
+    def generate_stream(self, prompt: str, model: Optional[str] = None) -> Generator[str, None, None]:
+        """
+        LLMを使用してストリーミング応答を生成する（テキスト生成用）。
+        """
+        target_model = model or self.model
+        logger.info("Stream Prompt sent to LLM (Model: %s): %s", target_model, prompt)
+
+        if self.openai_client:
+            try:
+                # Use standard chat completion for streaming text
+                stream = self.openai_client.chat.completions.create(
+                    model=target_model,
+                    messages=[
+                        {"role": "system", "content": "You are a helpful assistant."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    stream=True
+                )
+                for chunk in stream:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        yield chunk.choices[0].delta.content
+            except Exception as exc:
+                logger.error("[✗] OpenAI API stream request failed: %s", exc)
+                yield ""
+        else:
+            # Local LLM fallback (yielding full response as single chunk)
+            logger.info("Local LLM streaming fallback")
+            try:
+                 # Re-use generate_response but we need text, generate_response tries to parse JSON.
+                 # We'll make a direct call for text here to be safe, or just use generate_response if it can return string?
+                 # generate_response returns Optional[Dict].
+                 # We will do a raw request here for text.
+                 response = requests.post(
+                    self.api_url,
+                    json={"model": target_model, "prompt": prompt, "stream": False},
+                    timeout=120,
+                )
+                 response.raise_for_status()
+                 # Assuming local LLM returns JSON with 'response' key containing text
+                 text = response.json().get("response", "")
+                 yield text
+            except Exception as e:
+                logger.error(f"Local LLM stream fallback failed: {e}")
+                yield ""
 
     def get_embedding(self, text: str) -> List[float]:
         """

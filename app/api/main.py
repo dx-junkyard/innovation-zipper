@@ -306,7 +306,7 @@ async def chat_stream(request: ChatRequest):
             "hypothesis_generation": "仮説を立てています...",
             "rag_retrieval": "知識ベースを検索しています...",
             "gap_analysis": "情報の不足を分析しています...",
-            "response_planning": "回答を作成しています...",
+            "response_planning": "回答の方針を立てています...", # Updated message
             "intent_router": "意図を理解しています...",
             "discovery_exploration": "興味・関心を探索しています...",
             "structural_analysis": "構造分析を行っています...",
@@ -316,7 +316,7 @@ async def chat_stream(request: ChatRequest):
         }
 
         try:
-            # Execute workflow stream
+            # --- Phase 1: Thinking (Step Streaming) ---
             for step_output in workflow_manager.stream_invoke(initial_state):
                 for node_name, state_update in step_output.items():
                     # Update final state
@@ -331,18 +331,66 @@ async def chat_stream(request: ChatRequest):
                     }
                     yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
 
-            # Yield completion event
-            bot_message = final_state.get("bot_message", "申し訳ありません、エラーが発生しました。")
+            # --- Phase 2: Writing (Token Streaming) ---
+            # Yield event to indicate writing started
+            yield f"data: {json.dumps({'type': 'step', 'node': 'writing', 'content': '回答を執筆しています...'}, ensure_ascii=False)}\n\n"
+
+            response_plan = final_state.get("response_plan")
+
+            # Fallback if plan is missing or empty
+            if not response_plan:
+                plan_text = "特になし。ユーザーの質問に適切に答えてください。"
+            elif isinstance(response_plan, dict):
+                 plan_text = json.dumps(response_plan, ensure_ascii=False, indent=2)
+            else:
+                 plan_text = str(response_plan)
+
+            writing_prompt = f"""
+以下の回答方針（Response Plan）に基づいて、ユーザーへの回答を作成してください。
+
+# ユーザーの入力
+{message}
+
+# 回答方針
+{plan_text}
+
+# 制約
+- マークダウン形式で記述してください。
+- 方針に含まれる内容を網羅しつつ、自然な会話文にしてください。
+- 丁寧な口調で話しかけてください。
+"""
+            full_response = ""
+
+            # Streaming text generation
+            # Note: ai_client.generate_stream is a synchronous generator, but we are in async function.
+            # In FastAPI/Starlette, synchronous iterables in StreamingResponse run in a separate thread.
+            # However, here we are inside an async generator 'event_generator'.
+            # It's better to iterate it directly. The loop will block the event loop slightly but for tokens it's usually fine or we accept it for now.
+            # Ideally we would run it in a threadpool if it blocks heavily, but network IO inside sync generator might block.
+            # Given existing architecture, we iterate directly.
+
+            for token in ai_client.generate_stream(writing_prompt):
+                if token:
+                    full_response += token
+                    yield f"data: {json.dumps({'type': 'token', 'content': token}, ensure_ascii=False)}\n\n"
+
+            # Fallback if no response generated
+            if not full_response:
+                full_response = "申し訳ありません、回答の生成に失敗しました。"
+                yield f"data: {json.dumps({'type': 'token', 'content': full_response}, ensure_ascii=False)}\n\n"
+
+            # --- Completion ---
+            final_state["bot_message"] = full_response
+
             complete_data = {
                 "type": "complete",
-                "bot_message": bot_message,
+                "bot_message": full_response, # Optional here since we streamed it, but good for final consistency
                 "analysis_log": final_state.get("last_analysis_log"),
                 "interest_profile": final_state.get("interest_profile")
             }
             yield f"data: {json.dumps(complete_data, ensure_ascii=False)}\n\n"
 
             # Offload heavy saving to background task
-            # Ensure final_state is fully populated with what we have
             save_analysis_result_task.delay(user_id, message, final_state, user_message_id)
 
         except Exception as e:
