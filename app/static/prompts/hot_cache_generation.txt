@@ -14,10 +14,10 @@ Generate 3 distinct, high-quality suggestions for the user. These can be:
 
 **Output Format:**
 Return strictly a JSON object:
-{
+{{
   "suggestions": [
     "Suggestion 1 text...",
     "Suggestion 2 text...",
     "Suggestion 3 text..."
   ]
-}
+}}
