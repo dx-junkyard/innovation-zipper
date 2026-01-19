@@ -1,9 +1,12 @@
 import json
+import logging
 from pathlib import Path
 from typing import Dict, Any, Tuple
 from langchain_core.prompts import PromptTemplate
 from app.api.ai_client import AIClient
-from config import MODEL_RESPONSE_PLANNING
+from config import MODEL_RESPONSE_PLANNING, MODEL_FAST, MODEL_SMART
+
+logger = logging.getLogger(__name__)
 
 class ResponsePlanner:
     """
@@ -26,9 +29,44 @@ class ResponsePlanner:
         Returns:
             Tuple[Dict[str, Any], str]: 応答計画が追加されたコンテキストと、ボットのメッセージ
         """
-        prompt = self._create_prompt(context)
+        # Determine Mode and settings
+        mode = context.get("mode", "explorer") # Default to explorer if missing
 
-        result = self.ai_client.generate_response(prompt, model=MODEL_RESPONSE_PLANNING)
+        # Default settings
+        model_to_use = MODEL_RESPONSE_PLANNING # Default fallback
+        system_instruction = ""
+
+        if mode == "explorer":
+            # Explorer Mode settings
+            model_to_use = MODEL_FAST
+            system_instruction = (
+                "【システム指示】\n"
+                "・簡潔に答えてください。\n"
+                "・詳細は省き、ユーザーが興味を持ちそうなポイントを短く提示してください。\n"
+                "・レスポンスの速さを優先します。\n"
+                "・500文字以内で回答してください。\n"
+            )
+            logger.info("ResponsePlanner: Using Explorer Mode (Fast/Concise)")
+
+        elif mode == "deep_dive":
+            # Deep Dive Mode settings
+            model_to_use = MODEL_SMART
+            system_instruction = (
+                "【システム指示】\n"
+                "・専門家として振る舞ってください。\n"
+                "・マークダウンを用いて構造化された長文レポートを作成してください。\n"
+                "・多角的な視点、背景、構造分析を含めてじっくり解説してください。\n"
+                "・文字数制限はありません。\n"
+            )
+            logger.info("ResponsePlanner: Using Deep Dive Mode (Smart/Detailed)")
+
+        # Create base prompt
+        base_prompt = self._create_prompt(context)
+
+        # Inject system instruction at the beginning
+        final_prompt = f"{system_instruction}\n\n{base_prompt}"
+
+        result = self.ai_client.generate_response(final_prompt, model=model_to_use)
 
         bot_message = None
         if result:

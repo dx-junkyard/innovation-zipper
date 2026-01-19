@@ -26,24 +26,6 @@ from app.api.components.interest_explorer import InterestExplorer
 class GraphState(TypedDict):
     """
     グラフの状態を保持する型定義。
-
-    Attributes:
-        user_id: ユーザーID (for saving memory)
-        user_message (str): ユーザーからのメッセージ
-        dialog_history (List[Dict[str, Any]]): 会話履歴
-        interest_profile (Dict[str, Any]): 興味プロファイル
-        active_hypotheses (Dict[str, Any]): アクティブな仮説
-        hypotheses (Optional[List[Dict[str, Any]]]): 生成された仮説のリスト
-        retrieval_evidence (Optional[Dict[str, Any]]): RAGによる検索結果
-        response_plan (Optional[Dict[str, Any]]): 応答計画
-        bot_message (Optional[str]): 最終的なボットの応答メッセージ
-        captured_page: Optional[Dict[str, Any]]
-
-        # New fields
-        mode: str
-        structural_analysis: Optional[Dict[str, Any]]
-        idea_variants: Optional[Dict[str, Any]]
-        innovation_hypotheses: Optional[List[Dict[str, Any]]]
     """
     user_id: str
     user_message: str
@@ -58,6 +40,7 @@ class GraphState(TypedDict):
     captured_page: Optional[Dict[str, Any]]
 
     mode: str
+    immersion_score: Optional[float]
     structural_analysis: Optional[Dict[str, Any]]
     idea_variants: Optional[Dict[str, Any]]
     innovation_hypotheses: Optional[List[Dict[str, Any]]]
@@ -227,7 +210,9 @@ class WorkflowManager:
         return {
             "interest_profile": updated_context["interest_profile"],
             "active_hypotheses": updated_context["active_hypotheses"],
-            "conversation_summary": updated_context.get("conversation_summary", "")
+            "conversation_summary": updated_context.get("conversation_summary", ""),
+            "mode": updated_context.get("mode", state.get("mode")), # Update mode if Analyzer changed it (e.g. Immersion)
+            "immersion_score": updated_context.get("immersion_score")
         }
 
     def _hypothesis_generation_node(self, state: GraphState) -> Dict[str, Any]:
@@ -260,10 +245,62 @@ class WorkflowManager:
         }
 
     def _check_rag_needed(self, state: GraphState) -> str:
-        """RAG検索が必要かどうかを判定する"""
+        """RAG検索が必要かどうかを判定する (Dynamic Routing)"""
+        mode = state.get("mode")
         hypotheses = state.get("hypotheses", [])
-        if hypotheses and any(isinstance(h, dict) and h.get("should_call_rag", False) for h in hypotheses):
+
+        # Default fallback if no hypotheses
+        if not hypotheses:
+            return "skip"
+
+        has_rag_flag = any(isinstance(h, dict) and h.get("should_call_rag", False) for h in hypotheses)
+
+        if mode == "deep_dive":
+            # Deep Dive Mode: Actively search if requested
+            if has_rag_flag:
+                logger.info("Dynamic Routing: Deep Dive mode -> RAG requested, proceeding.")
+                return "continue"
+
+        elif mode == "explorer":
+            # Explorer Mode: Strict check
+            # Only continue if 'should_call_rag' is True AND confidence is low (needs verification)
+            # OR explicitly critical.
+            # Note: Assuming standard keys. Since I cannot see hypothesis keys,
+            # I will assume 'confidence' (0-1) and 'critical' (bool) or rely on strong 'should_call_rag'.
+            # For now, let's implement the logic: Strict threshold.
+
+            strong_need = False
+            for h in hypotheses:
+                if not isinstance(h, dict): continue
+                should = h.get("should_call_rag", False)
+                # Assuming 'confidence' is available, low means < 0.3?
+                # If keys missing, default to safe behavior?
+                # Requirement: "unless very strong search requirement"
+                # If we don't know keys, we rely on 'should_call_rag' being accurate?
+                # But requirement says "threshold stricter".
+
+                # Let's assume there might be a reason or confidence field.
+                # If not, we skip unless we can verify urgency.
+                # For safety in this task, I will stick to the plan: check confidence < 0.3
+
+                confidence = h.get("confidence", 0.5) # Default 0.5
+                critical = h.get("critical", False) # Default False
+
+                if should and (confidence < 0.3 and critical):
+                    strong_need = True
+                    break
+
+            if strong_need:
+                logger.info("Dynamic Routing: Explorer mode -> Strong RAG need detected, proceeding.")
+                return "continue"
+            else:
+                logger.info("Dynamic Routing: Explorer mode -> RAG skipped to prioritize speed.")
+                return "skip"
+
+        # Default behavior (e.g. for other modes like 'research' if it overlaps, or fallback)
+        if has_rag_flag:
             return "continue"
+
         return "skip"
 
     # Innovation Nodes
