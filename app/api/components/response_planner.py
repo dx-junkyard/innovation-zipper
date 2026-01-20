@@ -70,19 +70,23 @@ class ResponsePlanner:
 
         bot_message = None
         if result:
-            # Plan is stored in context["response_plan"] via workflow update
-            # But here we need to ensure the result is correctly parsed into the context structure expected by the caller or graph
-
-            # Since generate_response returns the JSON directly, we pass it back as the response_plan part of context
-            # We don't extract bot_message here anymore as it's generated later.
-
+            # コンテキストへの保存（既存）
             if isinstance(result, dict):
-                # Ensure the structure matches what workflow expects
-                if "response_plan" in result:
-                    context["response_plan"] = result["response_plan"]
-                else:
-                    # Fallback if LLM output structure varies slightly
-                    context["response_plan"] = result
+                context["response_plan"] = result
+            else:
+                context["response_plan"] = {"message": str(result)}
+
+            # 【修正箇所】bot_message への代入を追加
+            if isinstance(result, str):
+                bot_message = result
+            elif isinstance(result, dict):
+                # 辞書からメッセージを抽出（キーの揺らぎを吸収）
+                bot_message = (
+                    result.get("message") or
+                    result.get("answer") or
+                    result.get("content") or
+                    json.dumps(result, ensure_ascii=False) # 見つからなければJSON全体を文字列化
+                )
 
         return context, bot_message
 
