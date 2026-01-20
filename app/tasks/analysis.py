@@ -21,6 +21,8 @@ from config import MODEL_CAPTURE_FILTERING, MODEL_HOT_CACHE
 
 logger = logging.getLogger(__name__)
 
+RAG_SIMILARITY_THRESHOLD = 0.75
+
 @celery_app.task(name="run_workflow_task")
 def run_workflow_task(user_id: str, message: str, user_message_id: Optional[str] = None) -> Dict[str, Any]:
     """
@@ -589,7 +591,15 @@ def generate_hot_cache_task(user_id: str):
                         limit=3,
                         query_filter=None # We could filter by user_id here but keeping it broad for context
                     ).points
-                    memories = [point.payload.get("content", "") for point in results if point.payload]
+
+                    # 閾値によるフィルタリング
+                    valid_results = [p for p in results if p.score >= RAG_SIMILARITY_THRESHOLD]
+
+                    if not valid_results:
+                        memories = []
+                    else:
+                        memories = [point.payload.get("content", "") for point in valid_results if point.payload]
+
             except Exception as e:
                 logger.warning(f"Failed to fetch related memories: {e}")
 
