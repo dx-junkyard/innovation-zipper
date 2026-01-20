@@ -35,3 +35,5 @@
   },
   "suggested_next_mode": "discovery" | "innovation" | "research"
 }
+
+IMPORTANT: You must response with ONLY a raw JSON object. Do not include any markdown formatting like ```json ... ```.

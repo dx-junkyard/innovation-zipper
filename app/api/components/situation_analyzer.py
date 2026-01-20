@@ -73,7 +73,7 @@ class SituationAnalyzer:
         prompt = self._create_prompt(context)
 
         # Use generic generate_response instead of analyze_interaction
-        analysis_result = self.ai_client.generate_response(prompt, model=MODEL_SITUATION_ANALYSIS)
+        analysis_result = self.ai_client.generate_response(prompt, model=MODEL_SITUATION_ANALYSIS, force_json=True)
 
         if analysis_result:
             normalized_analysis = StateManager.normalize_analysis(analysis_result)

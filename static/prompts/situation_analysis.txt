@@ -84,3 +84,5 @@ Return a JSON object with the following structure:
   }},
   "conversation_summary": "Updated summary..."
 }}
+
+IMPORTANT: You must response with ONLY a raw JSON object. Do not include any markdown formatting like ```json ... ```.

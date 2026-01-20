@@ -82,13 +82,14 @@ class AIClient:
         """
         return model.startswith("gpt-5") or model.startswith("o1")
 
-    def generate_response(self, prompt: str, model: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def generate_response(self, prompt: str, model: Optional[str] = None, force_json: bool = False) -> Optional[Dict[str, Any]]:
         """
         LLMを使用して応答を生成する汎用メソッド。
 
         Args:
             prompt (str): プロンプト
             model (Optional[str]): 使用するモデル（指定がなければデフォルト）
+            force_json (bool): JSON形式を強制するかどうか
 
         Returns:
             Optional[Dict[str, Any]]: 生成されたJSONレスポンス
@@ -131,14 +132,17 @@ class AIClient:
                         logger.error(f"Error parsing GPT-5 response: {e}")
                         raw_text = str(response)
                 else:
-                    response = self.openai_client.chat.completions.create(
-                        model=target_model,
-                        messages=[
+                    kwargs = {
+                        "model": target_model,
+                        "messages": [
                             {"role": "system", "content": "You are a helpful assistant."},
                             {"role": "user", "content": prompt}
-                        ],
-                        response_format={"type": "json_object"}
-                    )
+                        ]
+                    }
+                    if force_json:
+                        kwargs["response_format"] = {"type": "json_object"}
+
+                    response = self.openai_client.chat.completions.create(**kwargs)
                     raw_text = response.choices[0].message.content.strip()
                 logger.info("OpenAI response raw text: %s", raw_text)
             except Exception as exc:
@@ -167,7 +171,7 @@ class AIClient:
         """
         JSON形式の応答を生成する（generate_responseのエイリアス）。
         """
-        return self.generate_response(prompt, model=model)
+        return self.generate_response(prompt, model=model, force_json=True)
 
     async def generate_stream(self, prompt: str, model: Optional[str] = None) -> AsyncGenerator[str, None]:
         """
