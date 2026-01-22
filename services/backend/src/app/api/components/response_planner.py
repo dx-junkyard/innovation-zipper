@@ -16,7 +16,7 @@ class ResponsePlanner:
     def __init__(self, ai_client: AIClient):
         self.ai_client = ai_client
         # プロンプトファイルのパス解決 (project_root/static/prompts/response_planning.txt)
-        prompt_path = Path(__file__).resolve().parents[3] / "static/prompts/response_planning.txt"
+        prompt_path = Path(__file__).resolve().parents[2] / "static/prompts/response_planning.txt"
         self.prompt_template = PromptTemplate.from_file(prompt_path)
 
     def plan_response(self, context: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:

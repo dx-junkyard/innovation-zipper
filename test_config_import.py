@@ -2,8 +2,9 @@
 import sys
 import os
 
-# Add the project root to sys.path to allow imports
-sys.path.append(os.getcwd())
+# Add the backend src directory to sys.path to allow imports
+# Assuming the script is run from the project root
+sys.path.append(os.path.join(os.getcwd(), "services/backend/src"))
 
 try:
     from config import (

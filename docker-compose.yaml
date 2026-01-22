@@ -3,8 +3,8 @@ version: '3'
 services:
   api:
     build:
-      context: .
-      dockerfile: Dockerfile.api
+      context: ./services/backend
+      dockerfile: Dockerfile
     ports:
       - "8086:8000"
     environment:
@@ -18,14 +18,15 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
     volumes:
-      - .:/app
+      - ./services/backend/src:/app
+      - ./topic-service:/app/topic-service
     networks:
       - app-network
 
   admin-api:
     build:
-      context: .
-      dockerfile: Dockerfile.api
+      context: ./services/backend
+      dockerfile: Dockerfile
     command: uvicorn app.api.admin:app --host 0.0.0.0 --port 8000 --reload
     ports:
       - "8087:8000"
@@ -38,18 +39,20 @@ services:
       - DB_HOST=db
       - OPENAI_API_KEY=${OPENAI_API_KEY}
     volumes:
-      - .:/app
+      - ./services/backend/src:/app
+      - ./topic-service:/app/topic-service
     networks:
       - app-network
 
   ui:
     build:
-      context: .
-      dockerfile: Dockerfile.ui
+      context: ./services/ui
+      dockerfile: Dockerfile
     ports:
       - "8080:8501"
     volumes:
-      - .:/app
+      - ./services/ui/src:/app
+      - ./topic-service:/app/topic-service
     networks:
       - app-network
 
@@ -108,8 +111,8 @@ services:
 
   worker:
     build:
-      context: .
-      dockerfile: Dockerfile.api
+      context: ./services/backend
+      dockerfile: Dockerfile
     container_name: celery_worker
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
@@ -122,7 +125,8 @@ services:
       - DB_HOST=db
       - OPENAI_API_KEY=${OPENAI_API_KEY}
     volumes:
-      - .:/app
+      - ./services/backend/src:/app
+      - ./topic-service:/app/topic-service
     depends_on:
       - redis
       - db

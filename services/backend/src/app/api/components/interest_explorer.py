@@ -7,7 +7,7 @@ from config import MODEL_INTEREST_EXPLORATION
 class InterestExplorer:
     def __init__(self, ai_client: AIClient):
         self.ai_client = ai_client
-        prompt_path = Path(__file__).resolve().parents[3] / "static/prompts/interest_exploration.txt"
+        prompt_path = Path(__file__).resolve().parents[2] / "static/prompts/interest_exploration.txt"
         with open(prompt_path, "r", encoding="utf-8") as f:
             self.base_prompt = f.read()
 

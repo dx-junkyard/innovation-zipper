@@ -10,11 +10,11 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
-COPY requirements.ui.txt .
-RUN pip install --no-cache-dir -r requirements.ui.txt
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY app/ui/ ./app/ui/
+COPY src/ .
 
 # Run Streamlit
 CMD ["streamlit", "run", "app/ui/ui.py", "--server.port", "8501", "--server.address", "0.0.0.0"]

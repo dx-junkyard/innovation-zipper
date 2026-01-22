@@ -13,7 +13,7 @@ class HypothesisGenerator:
     def __init__(self, ai_client: AIClient):
         self.ai_client = ai_client
         # プロンプトファイルのパス解決 (project_root/static/prompts/hypothesis_generation.txt)
-        prompt_path = Path(__file__).resolve().parents[3] / "static/prompts/hypothesis_generation.txt"
+        prompt_path = Path(__file__).resolve().parents[2] / "static/prompts/hypothesis_generation.txt"
         self.prompt_template = PromptTemplate.from_file(prompt_path)
 
     def generate(self, context: Dict[str, Any]) -> Dict[str, Any]:
