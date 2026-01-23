@@ -20,7 +20,7 @@ load_dotenv()
 # Use the same API_URL default as ui.py and derive the base endpoint for
 # additional API calls such as user registration.
 API_URL = os.getenv("API_URL", "http://api:8000/api/v1/user-message")
-API_BASE_URL = API_URL.rsplit("/", 1)[0]
+API_BASE_URL = os.getenv("API_BASE_URL", "http://api:8000/api/v1")
 logger.info("Using API base URL: %s", API_BASE_URL)
 
 LINE_CLIENT_ID = os.getenv("LINE_CHANNEL_ID")

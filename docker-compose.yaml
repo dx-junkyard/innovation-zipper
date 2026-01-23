@@ -55,6 +55,7 @@ services:
       - ./topic-service:/app/topic-service
     environment:
       - API_URL=http://api:8000/api/v1/chat/stream
+      - API_BASE_URL=http://api:8000/api/v1
       - LINE_CHANNEL_ID=${LINE_CHANNEL_ID}
       - LINE_CHANNEL_SECRET=${LINE_CHANNEL_SECRET}
       - LINE_REDIRECT_URI=${LINE_REDIRECT_URI}
