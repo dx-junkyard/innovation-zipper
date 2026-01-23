@@ -4,6 +4,8 @@ import os
 import graphviz
 import json
 from streamlit_agraph import agraph, Node, Edge, Config
+
+# --- 設定読み込み部分の修正 ---
 try:
     from config import settings
 except ImportError:
@@ -12,20 +14,36 @@ except ImportError:
         S3_PUBLIC_ENDPOINT_URL = os.environ.get("S3_PUBLIC_ENDPOINT_URL", "http://localhost:9000")
     settings = MockSettings()
 
-API_URL = os.environ.get("API_URL", "http://api:8000/api/v1")
+# 環境変数からベースURLを正しく取得するロジックに変更
+# API_BASE_URLが設定されていればそれを使い、なければAPI_URLから推測を試みる
+ENV_API_URL = os.environ.get("API_URL", "http://api:8000/api/v1/chat/stream")
+ENV_API_BASE_URL = os.environ.get("API_BASE_URL")
 
 def get_base_url():
     """Helper to get base API URL"""
-    base_url = API_URL.split('/user-message')[0]
-    if base_url.endswith('/'):
-        base_url = base_url[:-1]
-    return base_url
+    if ENV_API_BASE_URL:
+        return ENV_API_BASE_URL
+
+    # フォールバック: API_URLから不要なパスを取り除く
+    base = ENV_API_URL
+    for suffix in ["/chat/stream", "/user-message"]:
+        if base.endswith(suffix):
+            base = base[:-len(suffix)]
+            break
+
+    if base.endswith('/'):
+        base = base[:-1]
+    return base
+
+# グローバル変数として保持
+BASE_URL = get_base_url()
+# ---------------------------
 
 def fetch_innovation_history(user_id):
     """APIからイノベーション履歴を取得"""
     try:
-        base_url = get_base_url()
-        target_url = f"{base_url}/dashboard/innovations"
+        # get_base_url() の代わりに BASE_URL を使用
+        target_url = f"{BASE_URL}/dashboard/innovations"
 
         resp = requests.get(target_url, params={"user_id": user_id})
         resp.raise_for_status()
@@ -37,8 +55,7 @@ def fetch_innovation_history(user_id):
 def fetch_knowledge_graph(user_id):
     """APIからナレッジグラフデータを取得"""
     try:
-        base_url = get_base_url()
-        target_url = f"{base_url}/dashboard/knowledge-graph"
+        target_url = f"{BASE_URL}/dashboard/knowledge-graph"
 
         resp = requests.get(target_url, params={"user_id": user_id, "limit": 15})
         resp.raise_for_status()
@@ -50,8 +67,7 @@ def fetch_knowledge_graph(user_id):
 def fetch_neighbors(user_id, node_id):
     """ノードの隣接情報を取得"""
     try:
-        base_url = get_base_url()
-        target_url = f"{base_url}/dashboard/knowledge-graph/neighbors"
+        target_url = f"{BASE_URL}/dashboard/knowledge-graph/neighbors"
 
         resp = requests.get(target_url, params={"user_id": user_id, "node_id": node_id})
         resp.raise_for_status()
@@ -63,8 +79,7 @@ def fetch_neighbors(user_id, node_id):
 def fetch_all_user_contents(user_id):
     """APIからユーザーの全コンテンツ（ファイル、Webクリップ）を取得"""
     try:
-        base_url = get_base_url()
-        target_url = f"{base_url}/user-contents"
+        target_url = f"{BASE_URL}/user-contents"
 
         resp = requests.get(target_url, params={"user_id": user_id})
         resp.raise_for_status()
@@ -76,8 +91,7 @@ def fetch_all_user_contents(user_id):
 def send_content_feedback(user_id, content_id, content_type, new_categories, new_keywords=None, text_to_learn=None):
     """コンテンツのカテゴリ・キーワードフィードバックを送信"""
     try:
-        base_url = get_base_url()
-        target_url = f"{base_url}/feedback/content"
+        target_url = f"{BASE_URL}/feedback/content"
 
         payload = {
             "user_id": user_id,
@@ -98,7 +112,13 @@ def send_content_feedback(user_id, content_id, content_type, new_categories, new
 def load_categories():
     """カテゴリ定義を読み込む"""
     try:
+        # パス解決のロジックは変更なし
         path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../topic-service/categories.json'))
+        # コンテナ内のパス配置によっては調整が必要だが、現状のマウント設定ならこれで動く可能性が高い
+        # もし見つからない場合は /app/topic-service/categories.json を直接指定
+        if not os.path.exists(path):
+             path = "/app/topic-service/categories.json"
+
         with open(path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
@@ -117,8 +137,6 @@ def category_edit_dialog(item, category_data, user_id):
     if isinstance(current_keywords, str): # Fallback if API returns string
         current_keywords = [current_keywords]
 
-    # 既存カテゴリから初期選択状態を推測するのは少し難しいが、単純にサブカテゴリ名マッチで探す
-    # ここではユーザーがゼロから選び直すUIとする（既存カテゴリは参考表示）
     st.caption(f"現在のカテゴリ: {', '.join(current_cats)}")
 
     main_cats = list(category_data.keys())
@@ -143,16 +161,9 @@ def category_edit_dialog(item, category_data, user_id):
     keyword_input = st.text_area("キーワード", value=", ".join(current_keywords))
 
     if st.button("保存して更新"):
-        # キーワード処理
         new_keywords = [k.strip() for k in keyword_input.split(",") if k.strip()]
-
-        # カテゴリ処理（もし何も選ばれていない場合、既存を維持するか、警告するか。ここでは必須ではないとするが、できれば入力推奨）
-        # もしselected_subsが空なら、既存のカテゴリを引き継ぐロジックを入れるか、
-        # ユーザーが意図的にクリアしたい場合もあるので、空リストを送る。
-
         text_to_learn = f"{item['title']} {item.get('source', '')}"
 
-        # カテゴリが空でもキーワードがあればOKとする
         if selected_subs or new_keywords:
              if send_content_feedback(user_id, item['id'], item['type'], selected_subs, new_keywords, text_to_learn):
                  st.success("更新しました！")
@@ -321,7 +332,6 @@ def merge_graph_data(current_nodes, current_edges, new_data, node_styles):
             raw_image_url = n.get("properties", {}).get("image")
 
             # [Fix] 画像URLの検証を厳格化 (文字列かつ http または / で始まるもののみ許可)
-            # これを行わないと、ラベル名などが画像パスとして誤解釈され、404エラー(read error)を引き起こす
             is_valid_image = isinstance(raw_image_url, str) and (raw_image_url.startswith("http") or raw_image_url.startswith("/"))
 
             if is_valid_image:
@@ -332,7 +342,6 @@ def merge_graph_data(current_nodes, current_edges, new_data, node_styles):
                 image_path = None
 
             # [Fix] フロントエンドに渡すプロパティのサニタイズ
-            # imageキーが残っていると vis.js が混乱する場合があるため除外して渡す
             safe_properties = n.get("properties", {}).copy()
             if "image" in safe_properties:
                 del safe_properties["image"]
@@ -346,7 +355,7 @@ def merge_graph_data(current_nodes, current_edges, new_data, node_styles):
                 "shape": node_shape,
                 "title": n.get("label"),
                 "type": node_type,
-                "properties": safe_properties # [Fix] サニタイズ済みプロパティを使用
+                "properties": safe_properties
             }
 
             # 画像がある場合のみ image キーを追加
@@ -373,7 +382,8 @@ def get_file_url(file_id, raw_url=None):
     pdf_url = None
     if file_id:
         # Fetch presigned URL from API and convert to public URL
-        api_target = f"{API_URL}/user-files/{file_id}/content"
+        # BASE_URLを使用
+        api_target = f"{BASE_URL}/user-files/{file_id}/content"
         try:
             res = requests.get(api_target)
             if res.status_code == 200:
@@ -393,7 +403,7 @@ def render_graph_view():
 
     # ノードスタイルの定義
     NODE_STYLES = {
-        "Concept": {"color": "#5DADE2", "size": 25, "shape": "dot"},       # symbolType -> shape
+        "Concept": {"color": "#5DADE2", "size": 25, "shape": "dot"},
         "Category": {"color": "#5DADE2", "size": 25, "shape": "dot"},
         "Keyword": {"color": "#82E0AA", "size": 15, "shape": "diamond"},
         "Hypothesis": {"color": "#E74C3C", "size": 20, "shape": "triangle"},
@@ -403,12 +413,11 @@ def render_graph_view():
 
     # 1. キャッシュの強制クリアと初期化
     if "graph_version" not in st.session_state or st.session_state["graph_version"] != "v2":
-        # データ構造が変わったためリセット
         st.session_state["graph_nodes"] = []
         st.session_state["graph_edges"] = []
         st.session_state["expanded_nodes"] = set()
-        st.session_state["graph_version"] = "v2" # バージョン更新
-        st.session_state["last_clicked_node_id"] = None # クリック状態もリセット
+        st.session_state["graph_version"] = "v2"
+        st.session_state["last_clicked_node_id"] = None
 
     if not st.session_state["graph_nodes"]:
         init_data = fetch_knowledge_graph(user_id)
@@ -427,7 +436,7 @@ def render_graph_view():
         nodeHighlightBehavior=True,
         highlightColor="#F7A7A6",
         collapsible=False,
-        groups={},  # [Fix] 空のgroups定義を追加して警告を抑制
+        groups={},
         node={
             "labelProperty": "label",
             "renderLabel": True,
@@ -445,24 +454,14 @@ def render_graph_view():
     )
 
     # 3. インタラクション処理
-    # 状態変数の初期化
     if "last_clicked_node_id" not in st.session_state:
         st.session_state["last_clicked_node_id"] = None
 
     if selected_node_id:
-        # --- インタラクションロジック ---
-
-        # [FIX] 無限ループの原因となるため、自動Focusロジックを削除
-        # 以前のコード:
-        # if selected_node_id == st.session_state["last_clicked_node_id"]:
-        #     ... st.rerun() ...
-
         # 新しいノードをクリック -> Expand Mode (展開)
         if selected_node_id != st.session_state["last_clicked_node_id"]:
-            # 状態更新
             st.session_state["last_clicked_node_id"] = selected_node_id
 
-            # まだグラフに含まれていない隣接情報を追加
             with st.spinner(f"📡 {selected_node_id} の関連情報を展開中..."):
                 neighbors = fetch_neighbors(user_id, selected_node_id)
                 st.session_state["graph_nodes"], st.session_state["graph_edges"] = merge_graph_data(
@@ -476,7 +475,6 @@ def render_graph_view():
         # 選択されたノードオブジェクトを探す
         selected_node = next((n for n in st.session_state["graph_nodes"] if n.id == selected_node_id), None)
 
-        # ★重要: 以下のブロックは selected_node が存在する場合のみ実行されるようにインデントされています
         if selected_node:
             node_type = getattr(selected_node, "type", "Concept")
 
@@ -487,11 +485,9 @@ def render_graph_view():
                 target_id = getattr(e, "target", None) or e.__dict__.get("target")
 
                 if source_id == selected_node.id:
-                    # Target is neighbor
                     neighbor = next((n for n in st.session_state["graph_nodes"] if n.id == target_id), None)
                     if neighbor: current_node_neighbors.append(neighbor)
                 elif target_id == selected_node.id:
-                    # Source is neighbor
                     neighbor = next((n for n in st.session_state["graph_nodes"] if n.id == source_id), None)
                     if neighbor: current_node_neighbors.append(neighbor)
 
@@ -500,22 +496,18 @@ def render_graph_view():
                 st.header(f"Selected: {selected_node.label}")
                 st.markdown(f"Type: **{node_type}**")
 
-                # [FIX] Focus機能をボタンとして実装（ループ回避のため）
                 if st.button("🎯 このノードに集中する (Focus)"):
                     with st.spinner(f"🎯 {selected_node_id} に集中しています..."):
                         neighbors = fetch_neighbors(user_id, selected_node_id)
-                        # 既存データを破棄して入れ替え
                         st.session_state["graph_nodes"], st.session_state["graph_edges"] = merge_graph_data(
                             [], [], neighbors, NODE_STYLES
                         )
                         st.rerun()
 
-                # A. Hubの場合: 展開/収納
                 if node_type in ["Concept", "Category"]:
                     if selected_node_id in st.session_state["expanded_nodes"]:
                         st.success("展開済み (Expanded)")
 
-                # B. Leafの場合: 詳細表示
                 elif node_type == "Hypothesis":
                     props = getattr(selected_node, "properties", {})
                     st.markdown("### 📝 仮説の内容")
@@ -541,13 +533,11 @@ def render_graph_view():
                     if "summary" in props:
                         st.caption(props["summary"])
 
-                    # Show related Keywords
                     related_kws = [n for n in current_node_neighbors if getattr(n, "type", "") == "Keyword"]
                     if related_kws:
                         st.markdown("**🔑 関連キーワード:**")
                         st.write(", ".join([n.label for n in related_kws]))
 
-                    # Show related Categories
                     related_cats = [n for n in current_node_neighbors if getattr(n, "type", "") in ["Concept", "Category"]]
                     if related_cats:
                         st.markdown("**🏷️ 関連カテゴリ:**")
@@ -556,7 +546,6 @@ def render_graph_view():
                 elif node_type == "Keyword":
                     st.markdown(f"### 🔑 {selected_node.label}")
 
-                    # Show related Documents
                     related_docs = [n for n in current_node_neighbors if getattr(n, "type", "") == "Document"]
                     if related_docs:
                         st.markdown("**📂 関連ドキュメント:**")
@@ -573,7 +562,6 @@ def render_graph_view():
                             else:
                                 st.write(f"- {doc_title}")
 
-                    # Show related Categories
                     related_cats = [n for n in current_node_neighbors if getattr(n, "type", "") in ["Concept", "Category"]]
                     if related_cats:
                         st.markdown("**🏷️ 関連カテゴリ:**")
