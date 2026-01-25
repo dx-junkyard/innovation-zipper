@@ -8,7 +8,7 @@ celery_app = Celery(
     "worker",
     broker=broker_url,
     backend=result_backend,
-    include=["app.tasks.analysis"]
+    include=["app.tasks.analysis", "app.tasks.wikipedia_import"]
 )
 
 celery_app.conf.update(
