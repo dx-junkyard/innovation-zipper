@@ -130,6 +130,159 @@ def render_job_card(job: Dict[str, Any]):
                     st.error(err)
 
 
+def format_duration(seconds: float) -> str:
+    """Format duration in seconds to human readable string."""
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    elif seconds < 3600:
+        minutes = seconds / 60
+        return f"{minutes:.1f}min"
+    else:
+        hours = seconds / 3600
+        return f"{hours:.1f}h"
+
+
+def estimate_total_articles(file_size_bytes: int) -> int:
+    """
+    Estimate total articles based on file size.
+    Japanese Wikipedia (~5GB bz2) has approximately 1.4 million articles.
+    """
+    # Rough estimate: ~3.5KB per article in compressed form
+    return int(file_size_bytes / 3500)
+
+
+def render_active_job_progress(job_id: str):
+    """Render real-time progress for an active job."""
+    st.markdown("---")
+    st.subheader("📊 Import Progress")
+
+    progress_container = st.container()
+
+    # Create placeholders for dynamic updates
+    with progress_container:
+        try:
+            resp = requests.get(
+                get_admin_api_url(f"wikipedia/jobs/{job_id}"),
+                timeout=10
+            )
+
+            if resp.status_code != 200:
+                st.error("Failed to fetch job status")
+                return
+
+            job = resp.json().get("job", {})
+            status = job.get("status", "unknown")
+            progress = job.get("progress", {})
+            config = job.get("config", {})
+
+            # Status display
+            status_emoji = {
+                "pending": "⏳",
+                "running": "🔄",
+                "completed": "✅",
+                "failed": "❌",
+                "cancelled": "🚫",
+                "cancelling": "⚠️"
+            }.get(status, "❓")
+
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.markdown(f"### {status_emoji} Status: **{status.upper()}**")
+            with col2:
+                if status == "running":
+                    if st.button("🛑 Cancel Job", type="secondary"):
+                        try:
+                            cancel_resp = requests.post(
+                                get_admin_api_url(f"wikipedia/jobs/{job_id}/cancel")
+                            )
+                            if cancel_resp.status_code == 200:
+                                st.success("Cancellation requested")
+                                time.sleep(1)
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"Cancel failed: {e}")
+
+            # Progress metrics
+            total_parsed = progress.get("total_parsed", 0)
+            total_imported = progress.get("total_imported", 0)
+            total_errors = progress.get("total_errors", 0)
+            current_batch = progress.get("current_batch", 0)
+
+            # Estimate total (from config or file size estimation)
+            max_articles = config.get("max_articles")
+            if max_articles:
+                estimated_total = max_articles
+            else:
+                # For Japanese Wikipedia, estimate ~1.4M articles
+                estimated_total = 1400000
+
+            # Calculate progress percentage
+            if estimated_total > 0:
+                percent_complete = min(100, (total_parsed / estimated_total) * 100)
+            else:
+                percent_complete = 0
+
+            # Progress bar
+            st.progress(percent_complete / 100)
+
+            # Progress details in columns
+            cols = st.columns(5)
+            cols[0].metric("Parsed", f"{total_parsed:,}")
+            cols[1].metric("Imported", f"{total_imported:,}")
+            cols[2].metric("Errors", total_errors)
+            cols[3].metric("Batch", current_batch)
+            cols[4].metric("Progress", f"{percent_complete:.1f}%")
+
+            # Estimated time calculation
+            started_at = job.get("started_at")
+            if started_at and total_parsed > 0 and status == "running":
+                try:
+                    start_time = datetime.fromisoformat(started_at.replace('Z', '+00:00'))
+                    elapsed = (datetime.now(start_time.tzinfo) - start_time).total_seconds()
+
+                    articles_per_second = total_parsed / elapsed if elapsed > 0 else 0
+                    remaining_articles = estimated_total - total_parsed
+
+                    if articles_per_second > 0:
+                        eta_seconds = remaining_articles / articles_per_second
+
+                        st.info(
+                            f"⏱️ Speed: **{articles_per_second:.1f}** articles/sec | "
+                            f"Elapsed: **{format_duration(elapsed)}** | "
+                            f"ETA: **{format_duration(eta_seconds)}**"
+                        )
+                except Exception:
+                    pass
+
+            # Message
+            if job.get("message"):
+                st.caption(f"💬 {job['message']}")
+
+            # Errors preview
+            errors = job.get("errors", [])
+            if errors:
+                with st.expander(f"⚠️ Recent Errors ({len(errors)})", expanded=False):
+                    for err in errors[-5:]:
+                        if isinstance(err, dict):
+                            st.error(f"{err.get('message', '')}")
+                        else:
+                            st.error(err)
+
+            # Auto-refresh for running jobs
+            if status == "running":
+                st.caption("🔄 Auto-refreshing every 3 seconds...")
+                time.sleep(3)
+                st.rerun()
+            elif status in ["completed", "failed", "cancelled"]:
+                st.success("Job finished. You can start a new import above.")
+                if st.button("Clear and Start New Import"):
+                    del st.session_state["active_job_id"]
+                    st.rerun()
+
+        except Exception as e:
+            st.error(f"Error fetching job status: {e}")
+
+
 def render_upload_section():
     """Render file upload section."""
     st.subheader("📤 Upload Wikipedia Dump")
@@ -175,14 +328,36 @@ def render_upload_section():
 
 def render_import_section():
     """Render import configuration and start section."""
+    # Check if there's an active job
+    active_job_id = st.session_state.get("active_job_id")
+
+    if active_job_id:
+        # Show progress for active job
+        render_active_job_progress(active_job_id)
+        return
+
     st.subheader("🚀 Start Import Job")
 
     # File path input
     file_path = st.text_input(
         "File Path",
         value=st.session_state.get("uploaded_file_path", ""),
-        placeholder="/tmp/wikipedia_dumps/jawiki-20260101-pages-articles.xml.bz2"
+        placeholder="/data/wikipedia_dumps/jawiki-20260101-pages-articles.xml.bz2"
     )
+
+    # Show estimated articles if file exists
+    if file_path:
+        try:
+            import os
+            if os.path.exists(file_path):
+                file_size = os.path.getsize(file_path)
+                estimated = estimate_total_articles(file_size)
+                st.info(
+                    f"📁 File size: **{format_file_size(file_size)}** | "
+                    f"Estimated articles: **~{estimated:,}**"
+                )
+        except Exception:
+            pass
 
     # Import configuration
     col1, col2 = st.columns(2)
@@ -212,6 +387,13 @@ def render_import_section():
             help="Maximum number of articles to import (0 for all)"
         )
 
+    # Estimate time
+    if file_path and max_articles == 0:
+        st.warning(
+            "⚠️ Importing all articles from a full Wikipedia dump can take **several hours**. "
+            "Consider setting a Max Articles limit for testing."
+        )
+
     # Start button
     if st.button("Start Import", type="primary", disabled=not file_path):
         with st.spinner("Starting import job..."):
@@ -232,6 +414,7 @@ def render_import_section():
                     result = resp.json()
                     st.success(f"✅ Import job started! Job ID: {result['job_id']}")
                     st.session_state["active_job_id"] = result["job_id"]
+                    time.sleep(1)  # Small delay to let job start
                     st.rerun()
                 else:
                     st.error(f"Failed to start import: {resp.text}")
