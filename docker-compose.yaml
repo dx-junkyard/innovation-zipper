@@ -38,9 +38,16 @@ services:
       - NEO4J_PASSWORD=password
       - DB_HOST=db
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - WIKIPEDIA_UPLOAD_DIR=/data/wikipedia_dumps
     volumes:
       - ./services/backend/src:/app
       - ./topic-service:/app/topic-service
+      - ./data/wikipedia_dumps:/data/wikipedia_dumps
+    depends_on:
+      - redis
+      - qdrant
     networks:
       - app-network
 
@@ -56,9 +63,11 @@ services:
     environment:
       - API_URL=http://api:8000/api/v1/chat/stream
       - API_BASE_URL=http://api:8000/api/v1
+      - ADMIN_API_URL=http://admin-api:8000/api/v1/admin
       - LINE_CHANNEL_ID=${LINE_CHANNEL_ID}
       - LINE_CHANNEL_SECRET=${LINE_CHANNEL_SECRET}
       - LINE_REDIRECT_URI=${LINE_REDIRECT_URI}
+      - STREAMLIT_SERVER_MAX_UPLOAD_SIZE=7200
     networks:
       - app-network
 
@@ -130,9 +139,11 @@ services:
       - NEO4J_PASSWORD=password
       - DB_HOST=db
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - WIKIPEDIA_UPLOAD_DIR=/data/wikipedia_dumps
     volumes:
       - ./services/backend/src:/app
       - ./topic-service:/app/topic-service
+      - ./data/wikipedia_dumps:/data/wikipedia_dumps
     depends_on:
       - redis
       - db

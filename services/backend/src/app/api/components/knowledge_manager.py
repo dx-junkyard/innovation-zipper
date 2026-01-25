@@ -65,10 +65,18 @@ class KnowledgeManager:
     def _setup_qdrant_collection(self):
         """Create Qdrant collection if it doesn't exist."""
         if not self.qdrant_client.collection_exists(self.collection_name):
-            self.qdrant_client.create_collection(
-                collection_name=self.collection_name,
-                vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE),
-            )
+            try:
+                self.qdrant_client.create_collection(
+                    collection_name=self.collection_name,
+                    vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE),
+                )
+            except Exception as e:
+                # Ignore concurrent creation errors
+                if "already exists" in str(e) or "Conflict" in str(e):
+                    pass
+                else:
+                    print(f"[!] Failed to create collection: {e}")
+                    raise e
 
     def add_user_memory(self, user_id: str, content: str, memory_type: str = "user_hypothesis", category: str = None, meta: Dict[str, Any] = None) -> bool:
         """
@@ -180,6 +188,141 @@ class KnowledgeManager:
         except Exception as e:
             print(f"[✗] Qdrant upsert failed: {e}")
             return False
+
+    def import_raw_public_knowledge(self, source: str, items: List[Dict]) -> Dict:
+        """
+        Import raw public knowledge (e.g. Wikipedia) without embedding.
+        Fast import with zero-vectors.
+        """
+        self._setup_qdrant_collection()
+        points = []
+
+        # Use a zero vector of the correct dimension
+        dummy_vector = [0.0] * self.vector_size
+
+        for item in items:
+            content = item.get("content", "")
+            title = item.get("title", "")
+
+            # Generate ID
+            raw_id = item.get("id")
+            if raw_id:
+                # Always convert to UUID to handle non-UUID string IDs (like "234")
+                unique_str = f"{source}:{raw_id}"
+                md5_hash = hashlib.md5(unique_str.encode()).hexdigest()
+                item_id = str(uuid.UUID(hex=md5_hash))
+            else:
+                # Deterministic ID based on content hash
+                unique_str = f"{source}:{title}:{content[:100]}"
+                md5_hash = hashlib.md5(unique_str.encode()).hexdigest()
+                item_id = str(uuid.UUID(hex=md5_hash))
+
+            # Construct payload
+            payload = {
+                "user_id": "system",
+                "type": "public_knowledge",
+                "visibility": "public",
+                "content": content,
+                "meta": {
+                    "title": title,
+                    "url": item.get("url"),
+                    "is_embedded": False,
+                    "is_classified": False,
+                    "source": source,
+                    **item.get("metadata", {})
+                }
+            }
+
+            points.append(PointStruct(
+                id=item_id,
+                vector=dummy_vector,
+                payload=payload
+            ))
+
+        if points:
+            try:
+                # upsert with wait=False for speed
+                self.qdrant_client.upsert(
+                    collection_name=self.collection_name,
+                    wait=False,
+                    points=points
+                )
+                return {"status": "success", "count": len(points)}
+            except Exception as e:
+                print(f"[✗] Raw import failed: {e}")
+                return {"status": "error", "message": str(e)}
+
+        return {"status": "success", "count": 0}
+
+    def process_pending_embeddings(self, batch_size: int = 50) -> Dict:
+        """
+        Process pending embeddings for raw imported items.
+        """
+        if not self.qdrant_client.collection_exists(self.collection_name):
+             return {"status": "error", "message": "Collection does not exist"}
+
+        # Scroll for items with meta.is_embedded = False
+        # Note: Qdrant filter structure depends on payload structure.
+        # Our payload has "meta": { "is_embedded": False }
+        filter_condition = Filter(
+            must=[
+                FieldCondition(
+                    key="meta.is_embedded",
+                    match=MatchValue(value=False)
+                )
+            ]
+        )
+
+        try:
+            # Scroll results
+            scroll_result, _ = self.qdrant_client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=filter_condition,
+                limit=batch_size,
+                with_payload=True,
+                with_vectors=False
+            )
+
+            processed_count = 0
+            points_to_update = []
+
+            for point in scroll_result:
+                payload = point.payload
+                meta = payload.get("meta", {})
+
+                title = meta.get("title", "")
+                content = payload.get("content", "")
+
+                # Create text to embed
+                text_to_embed = f"{title}\n\n{content}"
+
+                # Generate embedding
+                vector = self.ai_client.get_embedding(text_to_embed)
+
+                if vector:
+                    # Update metadata
+                    meta["is_embedded"] = True
+                    payload["meta"] = meta
+
+                    points_to_update.append(PointStruct(
+                        id=point.id,
+                        vector=vector,
+                        payload=payload
+                    ))
+                    processed_count += 1
+
+            if points_to_update:
+                self.qdrant_client.upsert(
+                    collection_name=self.collection_name,
+                    wait=True,
+                    points=points_to_update
+                )
+
+            return {"status": "success", "processed": processed_count}
+
+        except Exception as e:
+            print(f"[✗] Process pending embeddings failed: {e}")
+            return {"status": "error", "message": str(e)}
 
     def import_catalog(self, catalog_data: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
