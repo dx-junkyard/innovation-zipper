@@ -2,6 +2,7 @@
 Wikipedia Import Celery Tasks
 
 Handles background processing of Wikipedia dump files for RAG import.
+Supports hybrid model configuration for cost-effective embedding generation.
 """
 
 import os
@@ -19,6 +20,11 @@ from app.utils.wikipedia_parser import (
     WikipediaImportStats
 )
 from app.api.components.knowledge_manager import KnowledgeManager
+from config import (
+    TASK_WIKI_EMBEDDING,
+    EmbeddingConfig,
+    generate_collection_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,11 +53,20 @@ class ImportJobManager:
 
     def create_job(self, file_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
         """Create a new import job."""
+        # Include embedding configuration in job data
+        embedding_config = config.get("embedding_config", TASK_WIKI_EMBEDDING.to_dict())
+        collection_name = generate_collection_name(
+            "knowledge_base",
+            EmbeddingConfig(**embedding_config) if isinstance(embedding_config, dict) else embedding_config
+        )
+
         job_data = {
             "job_id": self.job_id,
             "status": "pending",
             "file_path": file_path,
             "config": config,
+            "embedding_config": embedding_config,
+            "collection_name": collection_name,
             "created_at": datetime.now().isoformat(),
             "started_at": None,
             "completed_at": None,
@@ -148,18 +163,19 @@ class ImportJobManager:
             "job_id": self.job_id,
             "message": message,
             "timestamp": datetime.now().isoformat(),
-            "progress": job_data.get("progress", {})
+            "progress": job_data.get("progress", {}),
+            "collection_name": job_data.get("collection_name"),
+            "embedding_config": job_data.get("embedding_config")
         }
 
         # Publish for real-time subscribers
         self.redis.publish(NOTIFICATION_CHANNEL, json.dumps(notification))
 
         # Store in history for polling-based clients
-        # Only store important notifications (errors, completion, start)
         if event_type in ["error", "completed", "failed", "cancelled", "running"]:
             self.redis.lpush(NOTIFICATION_HISTORY_KEY, json.dumps(notification))
-            self.redis.ltrim(NOTIFICATION_HISTORY_KEY, 0, 99)  # Keep last 100
-            self.redis.expire(NOTIFICATION_HISTORY_KEY, 86400)  # 24 hour TTL
+            self.redis.ltrim(NOTIFICATION_HISTORY_KEY, 0, 99)
+            self.redis.expire(NOTIFICATION_HISTORY_KEY, 86400)
 
     @staticmethod
     def list_jobs(limit: int = 20) -> List[Dict[str, Any]]:
@@ -203,10 +219,13 @@ def wikipedia_import_task(
     file_path: str,
     batch_size: int = 100,
     max_articles: Optional[int] = None,
-    min_content_length: int = 100
+    min_content_length: int = 100,
+    embedding_config: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Main task for importing Wikipedia dump.
+
+    Uses TASK_WIKI_EMBEDDING by default for cost-effective processing with local LLM.
 
     Args:
         job_id: Unique job identifier
@@ -214,12 +233,25 @@ def wikipedia_import_task(
         batch_size: Number of articles per batch
         max_articles: Maximum articles to import (None for all)
         min_content_length: Minimum content length to include
+        embedding_config: Optional embedding configuration override (dict form)
 
     Returns:
         Import result summary
     """
     job_manager = ImportJobManager(job_id)
     stats = WikipediaImportStats()
+
+    # Parse embedding config
+    if embedding_config:
+        embed_config = EmbeddingConfig(**embedding_config)
+    else:
+        embed_config = TASK_WIKI_EMBEDDING
+
+    logger.info(
+        f"Wikipedia import using embedding config: "
+        f"provider={embed_config.provider}, model={embed_config.model}, "
+        f"dimension={embed_config.dimension}"
+    )
 
     try:
         # Validate file
@@ -234,8 +266,11 @@ def wikipedia_import_task(
             f"Starting import from {os.path.basename(file_path)}..."
         )
 
-        # Initialize knowledge manager
-        km = KnowledgeManager()
+        # Initialize knowledge manager with specific embedding config
+        km = KnowledgeManager(embedding_config=embed_config)
+        collection_name = km.collection_name
+
+        logger.info(f"Importing to collection: {collection_name}")
 
         # Parse and import
         logger.info(f"Starting Wikipedia import: {file_path}")
@@ -258,7 +293,8 @@ def wikipedia_import_task(
                 )
                 return {
                     "status": "cancelled",
-                    "imported": stats.total_imported
+                    "imported": stats.total_imported,
+                    "collection": collection_name
                 }
 
             stats.current_batch += 1
@@ -279,11 +315,12 @@ def wikipedia_import_task(
                 })
                 stats.total_parsed += 1
 
-            # Import batch
+            # Import batch using the configured embedding config
             try:
                 result = km.import_raw_public_knowledge(
                     source="wikipedia",
-                    items=items
+                    items=items,
+                    embedding_config=embed_config
                 )
 
                 if result["status"] == "success":
@@ -323,13 +360,15 @@ def wikipedia_import_task(
         # Complete
         job_manager.update_status(
             "completed",
-            f"Import completed: {stats.total_imported} articles imported",
+            f"Import completed: {stats.total_imported} articles imported to {collection_name}",
             progress=stats.to_dict()
         )
 
         return {
             "status": "completed",
             "job_id": job_id,
+            "collection": collection_name,
+            "embedding_config": embed_config.to_dict(),
             **stats.to_dict()
         }
 
@@ -350,25 +389,44 @@ def wikipedia_import_task(
 @celery_app.task(name="process_wikipedia_embeddings_task")
 def process_wikipedia_embeddings_task(
     batch_size: int = 50,
-    max_batches: Optional[int] = None
+    max_batches: Optional[int] = None,
+    embedding_config: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Background task to process pending embeddings for Wikipedia articles.
 
+    Uses TASK_WIKI_EMBEDDING by default for cost-effective processing with local LLM.
+
     Args:
         batch_size: Number of items per batch
         max_batches: Maximum number of batches to process (None for all)
+        embedding_config: Optional embedding configuration override (dict form)
 
     Returns:
         Processing result summary
     """
-    km = KnowledgeManager()
+    # Parse embedding config
+    if embedding_config:
+        embed_config = EmbeddingConfig(**embedding_config)
+    else:
+        embed_config = TASK_WIKI_EMBEDDING
+
+    logger.info(
+        f"Processing embeddings with config: "
+        f"provider={embed_config.provider}, model={embed_config.model}"
+    )
+
+    km = KnowledgeManager(embedding_config=embed_config)
+    collection_name = km.collection_name
     total_processed = 0
     batch_count = 0
 
     try:
         while True:
-            result = km.process_pending_embeddings(batch_size=batch_size)
+            result = km.process_pending_embeddings(
+                batch_size=batch_size,
+                embedding_config=embed_config
+            )
 
             if result["status"] != "success":
                 logger.error(f"Embedding processing failed: {result.get('message')}")
@@ -394,7 +452,9 @@ def process_wikipedia_embeddings_task(
         return {
             "status": "completed",
             "total_processed": total_processed,
-            "batches": batch_count
+            "batches": batch_count,
+            "collection": collection_name,
+            "embedding_config": embed_config.to_dict()
         }
 
     except Exception as e:
@@ -402,5 +462,37 @@ def process_wikipedia_embeddings_task(
         return {
             "status": "error",
             "message": str(e),
-            "total_processed": total_processed
+            "total_processed": total_processed,
+            "collection": collection_name
         }
+
+
+@celery_app.task(name="get_embedding_status_task")
+def get_embedding_status_task(
+    embedding_config: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Get status of pending embeddings for a specific configuration.
+
+    Args:
+        embedding_config: Optional embedding configuration (dict form)
+
+    Returns:
+        Status information including pending count
+    """
+    if embedding_config:
+        embed_config = EmbeddingConfig(**embedding_config)
+    else:
+        embed_config = TASK_WIKI_EMBEDDING
+
+    km = KnowledgeManager(embedding_config=embed_config)
+
+    pending_count = km.get_pending_embedding_count(embed_config)
+    collections = km.list_available_collections()
+
+    return {
+        "pending_count": pending_count,
+        "collection": km.collection_name,
+        "embedding_config": embed_config.to_dict(),
+        "all_collections": collections
+    }
