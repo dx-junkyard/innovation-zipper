@@ -147,6 +147,14 @@ class CreateTeamRequest(BaseModel):
     created_by: str
     description: Optional[str] = None
 
+
+class HypothesisDraftRequest(BaseModel):
+    """Chrome拡張からの仮説ドラフト生成リクエスト"""
+    url: str
+    title: str
+    content: str
+    user_id: Optional[str] = "extension-user"
+
 class AddTeamMemberRequest(BaseModel):
     team_id: str
     user_id: str
@@ -801,6 +809,117 @@ async def get_user_contents(user_id: str = Query(..., description="User ID")):
     repo = DBClient()
     contents = repo.get_all_user_contents(user_id)
     return {"contents": contents}
+
+
+# =============================================================================
+# Chrome Extension - Hypothesis Draft API
+# =============================================================================
+
+from pathlib import Path
+from langchain_core.prompts import PromptTemplate
+from config import MODEL_HYPOTHESIS_GENERATION
+
+
+# Chrome拡張ダウンロードエンドポイント
+EXTENSION_ZIP_PATH = Path(__file__).resolve().parents[5] / "extension/team-brain-extension.zip"
+
+
+@app.get("/api/v1/extension/download")
+async def download_extension():
+    """
+    ビルド済みのChrome拡張をダウンロードする。
+    """
+    if not EXTENSION_ZIP_PATH.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="拡張機能がまだビルドされていません。'npm run build:extension' を実行してください。"
+        )
+
+    return FileResponse(
+        path=str(EXTENSION_ZIP_PATH),
+        filename="team-brain-extension.zip",
+        media_type="application/zip"
+    )
+
+
+@app.get("/api/v1/extension/info")
+async def get_extension_info():
+    """
+    Chrome拡張の情報とインストール手順を取得する。
+    """
+    is_available = EXTENSION_ZIP_PATH.exists()
+
+    return {
+        "available": is_available,
+        "version": "1.0.0",
+        "filename": "team-brain-extension.zip",
+        "install_instructions": [
+            "1. 「拡張機能をダウンロード」ボタンをクリックしてzipファイルをダウンロード",
+            "2. ダウンロードしたzipファイルを展開",
+            "3. Chromeで chrome://extensions/ を開く",
+            "4. 右上の「デベロッパーモード」をONにする",
+            "5. 「パッケージ化されていない拡張機能を読み込む」をクリック",
+            "6. 展開したフォルダを選択してインストール完了"
+        ]
+    }
+
+
+@app.post("/api/v1/hypothesis/draft")
+async def generate_hypothesis_draft(request: HypothesisDraftRequest):
+    """
+    Chrome拡張から送信されたWebページ内容を解析し、
+    仮説ドラフト（statement, context, conditions）を自動生成する。
+    """
+    ai_client = AIClient()
+
+    # プロンプトテンプレートを読み込み
+    prompt_path = Path(__file__).resolve().parents[1] / "static/prompts/hypothesis_draft.txt"
+    try:
+        prompt_template = PromptTemplate.from_file(prompt_path)
+    except Exception as e:
+        logger.error(f"Failed to load prompt template: {e}")
+        raise HTTPException(status_code=500, detail="Prompt template not found")
+
+    # コンテンツが長すぎる場合は切り詰め
+    content = request.content
+    max_content_length = 8000  # トークン数を考慮
+    if len(content) > max_content_length:
+        content = content[:max_content_length] + "\n...(以下省略)"
+
+    # プロンプトを作成
+    prompt = prompt_template.format(
+        url=request.url,
+        title=request.title,
+        content=content
+    )
+
+    # AIによる仮説ドラフト生成
+    try:
+        result = ai_client.generate_response(
+            prompt,
+            model=MODEL_HYPOTHESIS_GENERATION
+        )
+    except Exception as e:
+        logger.error(f"AI generation failed: {e}")
+        raise HTTPException(status_code=500, detail="AI generation failed")
+
+    if not result:
+        logger.warning("Empty result from AI")
+        # フォールバック: 基本的な構造を返す
+        return {
+            "statement": f"「{request.title}」に関する仮説",
+            "context": "このページの内容から仮説を抽出してください。",
+            "conditions": "",
+            "tags": []
+        }
+
+    # 結果を整形して返す
+    return {
+        "statement": result.get("statement", ""),
+        "context": result.get("context", ""),
+        "conditions": result.get("conditions", ""),
+        "tags": result.get("tags", [])
+    }
 
 
 # =============================================================================

@@ -16,3 +16,8 @@ dist/
 build/
 *.egg-info/
 mock_hypotheses.json
+
+# Chrome Extension build artifacts
+extension/team-brain-extension.zip
+extension/dist/
+node_modules/

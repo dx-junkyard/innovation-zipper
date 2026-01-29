@@ -184,6 +184,47 @@ class ChatUI:
                     except Exception as e:
                         st.sidebar.error(f"通信エラー: {e}")
 
+        # --- Chrome Extension Section ---
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("🧩 Chrome拡張機能")
+
+        # 拡張機能の情報を取得
+        extension_info_url = self.API_URL.replace("/chat/stream", "/extension/info")
+        try:
+            info_resp = requests.get(extension_info_url, timeout=5)
+            if info_resp.status_code == 200:
+                ext_info = info_resp.json()
+
+                st.sidebar.write("Webページから仮説を自動生成する拡張機能です。")
+
+                if ext_info.get("available"):
+                    # ダウンロードボタン
+                    download_url = self.API_URL.replace("/chat/stream", "/extension/download")
+                    try:
+                        dl_resp = requests.get(download_url, timeout=30)
+                        if dl_resp.status_code == 200:
+                            st.sidebar.download_button(
+                                label="📥 拡張機能をダウンロード",
+                                data=dl_resp.content,
+                                file_name="team-brain-extension.zip",
+                                mime="application/zip",
+                                use_container_width=True
+                            )
+                    except Exception as e:
+                        st.sidebar.warning("ダウンロードの準備中にエラーが発生しました")
+
+                    # インストール手順を表示
+                    with st.sidebar.expander("📖 インストール手順"):
+                        for step in ext_info.get("install_instructions", []):
+                            st.write(step)
+                else:
+                    st.sidebar.info("拡張機能は準備中です")
+            else:
+                st.sidebar.info("拡張機能の情報を取得できませんでした")
+        except Exception as e:
+            # APIが利用できない場合は静かに無視
+            pass
+
         if page == "Chat":
             # トピックが選択されている場合は、チャット欄の上部に「まとめと質問」を表示
             if st.session_state.get("show_topic_info"):
