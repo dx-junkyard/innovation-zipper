@@ -140,7 +140,7 @@ class ChatUI:
         ensure_login()
 
         # ページ切り替えロジック
-        page = st.sidebar.radio("Menu", ["Chat", "Dashboard", "Admin"])
+        page = st.sidebar.radio("Menu", ["Chat", "Team Brain", "Dashboard", "Admin"])
 
         # サイドバー：関連カテゴリーボタンの表示
         st.sidebar.markdown("---")
@@ -189,6 +189,9 @@ class ChatUI:
             if st.session_state.get("show_topic_info"):
                 self.render_topic_deep_dive(st.session_state.selected_topic)
             self.render_chat()
+        elif page == "Team Brain":
+            from team_brain import show_team_brain_dashboard
+            show_team_brain_dashboard()
         elif page == "Dashboard":
             from dashboard import show_dashboard
             show_dashboard()

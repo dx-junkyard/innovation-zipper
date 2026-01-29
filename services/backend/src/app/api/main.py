@@ -18,6 +18,7 @@ from app.api.state_manager import StateManager
 from app.api.components.knowledge_manager import KnowledgeManager
 from app.api.components.graph_manager import GraphManager
 from app.api.components.topic_client import TopicClient
+from app.api.components.team_brain import TeamBrainManager
 from app.tasks.analysis import run_workflow_task, process_capture_task, process_document_task, save_analysis_result_task
 from pydantic import BaseModel, Field, HttpUrl
 import requests
@@ -82,6 +83,74 @@ class CaptureRequest(BaseModel):
 class TopicDeepDiveRequest(BaseModel):
     user_id: str
     topic: str
+
+
+# =============================================================================
+# Team Brain Request Models
+# =============================================================================
+
+class HypothesisIncubateRequest(BaseModel):
+    user_id: str
+    experience: str
+    interest_profile: Optional[Dict[str, Any]] = None
+    auto_score: bool = True
+    check_sharing: bool = True
+
+class HypothesisRefineRequest(BaseModel):
+    user_id: str
+    hypothesis_id: str
+    feedback: str
+
+class HypothesisUpdateVerificationRequest(BaseModel):
+    user_id: str
+    hypothesis_id: str
+    verification_state: str  # UNVERIFIED, IN_PROGRESS, VALIDATED, FAILED
+    notes: Optional[str] = None
+
+class SuggestionResponseRequest(BaseModel):
+    suggestion_id: int
+    user_id: str
+    action: str  # accept, reject, edit
+    edited_content: Optional[str] = None
+    team_id: Optional[str] = None
+
+class AddVerificationRequest(BaseModel):
+    user_id: str
+    hypothesis_id: str
+    verification_result: str  # SUCCESS, FAILURE, PARTIAL, INCONCLUSIVE
+    conditions: Optional[str] = None
+    notes: Optional[str] = None
+    evidence: Optional[Dict[str, Any]] = None
+    team_id: Optional[str] = None
+
+class CollectiveWisdomRequest(BaseModel):
+    user_id: str
+    thought: str
+    category: Optional[str] = None
+
+class DifferentialVerificationRequest(BaseModel):
+    user_id: str
+    hypothesis_id: str
+    new_conditions: str
+
+class RecordDifferentialRequest(BaseModel):
+    user_id: str
+    parent_hypothesis_id: str
+    verification_result: str
+    conditions: str
+    notes: Optional[str] = None
+    evidence: Optional[Dict[str, Any]] = None
+    team_id: Optional[str] = None
+
+class CreateTeamRequest(BaseModel):
+    name: str
+    created_by: str
+    description: Optional[str] = None
+
+class AddTeamMemberRequest(BaseModel):
+    team_id: str
+    user_id: str
+    role: str = "viewer"
 
 
 @app.post("/api/v1/webhook/capture")
@@ -732,6 +801,282 @@ async def get_user_contents(user_id: str = Query(..., description="User ID")):
     repo = DBClient()
     contents = repo.get_all_user_contents(user_id)
     return {"contents": contents}
+
+
+# =============================================================================
+# Team Brain API Endpoints
+# =============================================================================
+
+def get_team_brain_manager() -> TeamBrainManager:
+    """Get TeamBrainManager instance."""
+    ai_client = AIClient()
+    return TeamBrainManager(ai_client)
+
+
+# ---------------------------------------------------------------------------
+# 1階: 思考の私有地 (Private Layer) - FR-103, FR-104
+# ---------------------------------------------------------------------------
+
+@app.post("/api/v1/team-brain/hypotheses/incubate")
+async def incubate_hypothesis(request: HypothesisIncubateRequest):
+    """
+    経験から仮説を生成する（FR-103: 仮説形成アシスタント）
+    """
+    manager = get_team_brain_manager()
+    result = manager.incubate_hypothesis(
+        user_id=request.user_id,
+        experience=request.experience,
+        interest_profile=request.interest_profile,
+        auto_score=request.auto_score,
+        check_sharing=request.check_sharing
+    )
+    return result
+
+
+@app.post("/api/v1/team-brain/hypotheses/refine")
+async def refine_hypothesis(request: HypothesisRefineRequest):
+    """
+    仮説をブラッシュアップする（壁打ち）
+    """
+    manager = get_team_brain_manager()
+    result = manager.refine_hypothesis(
+        user_id=request.user_id,
+        hypothesis_id=request.hypothesis_id,
+        feedback=request.feedback
+    )
+    return result
+
+
+@app.get("/api/v1/team-brain/hypotheses/my")
+async def get_my_hypotheses(
+    user_id: str = Query(..., description="User ID"),
+    status: Optional[str] = Query(None, description="Filter by status (DRAFT, PROPOSED, SHARED)"),
+    verification_state: Optional[str] = Query(None, description="Filter by verification state"),
+    limit: int = Query(50, ge=1, le=100)
+):
+    """
+    自分の仮説一覧を取得する
+    """
+    manager = get_team_brain_manager()
+    hypotheses = manager.get_my_hypotheses(
+        user_id=user_id,
+        status=status,
+        verification_state=verification_state,
+        limit=limit
+    )
+    return {"hypotheses": hypotheses}
+
+
+@app.post("/api/v1/team-brain/hypotheses/verification-state")
+async def update_hypothesis_verification_state(request: HypothesisUpdateVerificationRequest):
+    """
+    仮説の検証ステータスを更新する（FR-104: 検証ステータス管理）
+    """
+    manager = get_team_brain_manager()
+    result = manager.update_verification_state(
+        user_id=request.user_id,
+        hypothesis_id=request.hypothesis_id,
+        verification_state=request.verification_state,
+        notes=request.notes
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 2階: 情報の関所 (Gateway Layer) - FR-201, FR-202
+# ---------------------------------------------------------------------------
+
+@app.post("/api/v1/team-brain/hypotheses/{hypothesis_id}/score")
+async def score_hypothesis(hypothesis_id: str):
+    """
+    仮説の品質をスコアリングする（FR-201: 仮説品質スコアリング）
+    """
+    manager = get_team_brain_manager()
+    result = manager.score_hypothesis(hypothesis_id)
+    return result
+
+
+@app.get("/api/v1/team-brain/suggestions/pending")
+async def get_pending_suggestions(user_id: str = Query(..., description="User ID")):
+    """
+    保留中の共有サジェストを取得する（FR-202）
+    """
+    manager = get_team_brain_manager()
+    suggestions = manager.get_pending_suggestions(user_id)
+    return {"suggestions": suggestions}
+
+
+@app.post("/api/v1/team-brain/suggestions/respond")
+async def respond_to_suggestion(request: SuggestionResponseRequest):
+    """
+    共有サジェストに応答する（FR-202: 承認フロー）
+    """
+    manager = get_team_brain_manager()
+    result = manager.respond_to_suggestion(
+        suggestion_id=request.suggestion_id,
+        user_id=request.user_id,
+        action=request.action,
+        edited_content=request.edited_content,
+        team_id=request.team_id
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 3階: 共創の広場 (Public Layer) - FR-301
+# ---------------------------------------------------------------------------
+
+@app.get("/api/v1/team-brain/hypotheses/shared")
+async def get_shared_hypotheses(
+    team_id: Optional[str] = Query(None, description="Filter by team"),
+    verification_state: Optional[str] = Query(None, description="Filter by verification state"),
+    limit: int = Query(50, ge=1, le=100)
+):
+    """
+    共有された仮説バンクを取得する（FR-301）
+    """
+    manager = get_team_brain_manager()
+    hypotheses = manager.get_shared_hypotheses(
+        team_id=team_id,
+        verification_state=verification_state,
+        limit=limit
+    )
+    return {"hypotheses": hypotheses}
+
+
+@app.post("/api/v1/team-brain/hypotheses/verify")
+async def add_verification(request: AddVerificationRequest):
+    """
+    仮説に検証結果を追加する（FR-301: 検証ステータス共有）
+    """
+    manager = get_team_brain_manager()
+    result = manager.add_verification(
+        user_id=request.user_id,
+        hypothesis_id=request.hypothesis_id,
+        verification_result=request.verification_result,
+        conditions=request.conditions,
+        notes=request.notes,
+        evidence=request.evidence,
+        team_id=request.team_id
+    )
+    return result
+
+
+@app.get("/api/v1/team-brain/hypotheses/{hypothesis_id}/verifications")
+async def get_hypothesis_verifications(hypothesis_id: str):
+    """
+    仮説の検証履歴を取得する
+    """
+    manager = get_team_brain_manager()
+    result = manager.get_hypothesis_verifications(hypothesis_id)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 循環型RAG (Cross-Layer RAG) - FR-401, FR-402
+# ---------------------------------------------------------------------------
+
+@app.post("/api/v1/team-brain/think")
+async def think_with_collective_wisdom(request: CollectiveWisdomRequest):
+    """
+    組織の集合知を活用してアドバイスを取得する（FR-401: ステータス考慮型RAG）
+    """
+    manager = get_team_brain_manager()
+    result = manager.think_with_collective_wisdom(
+        user_id=request.user_id,
+        thought=request.thought,
+        category=request.category
+    )
+    return result
+
+
+@app.post("/api/v1/team-brain/differential/suggest")
+async def suggest_differential_verification(request: DifferentialVerificationRequest):
+    """
+    差分検証を提案する（FR-402）
+    """
+    manager = get_team_brain_manager()
+    result = manager.suggest_differential_verification(
+        user_id=request.user_id,
+        hypothesis_id=request.hypothesis_id,
+        new_conditions=request.new_conditions
+    )
+    return result
+
+
+@app.post("/api/v1/team-brain/differential/record")
+async def record_differential_verification(request: RecordDifferentialRequest):
+    """
+    差分検証結果を記録する（FR-402）
+    """
+    manager = get_team_brain_manager()
+    result = manager.record_differential_verification(
+        user_id=request.user_id,
+        parent_hypothesis_id=request.parent_hypothesis_id,
+        verification_result=request.verification_result,
+        conditions=request.conditions,
+        notes=request.notes,
+        evidence=request.evidence,
+        team_id=request.team_id
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# チーム管理
+# ---------------------------------------------------------------------------
+
+@app.post("/api/v1/team-brain/teams")
+async def create_team(request: CreateTeamRequest):
+    """
+    チームを作成する
+    """
+    manager = get_team_brain_manager()
+    result = manager.create_team(
+        name=request.name,
+        created_by=request.created_by,
+        description=request.description
+    )
+    return result
+
+
+@app.get("/api/v1/team-brain/teams")
+async def get_my_teams(user_id: str = Query(..., description="User ID")):
+    """
+    所属チーム一覧を取得する
+    """
+    manager = get_team_brain_manager()
+    teams = manager.get_my_teams(user_id)
+    return {"teams": teams}
+
+
+@app.post("/api/v1/team-brain/teams/members")
+async def add_team_member(request: AddTeamMemberRequest):
+    """
+    チームにメンバーを追加する
+    """
+    manager = get_team_brain_manager()
+    result = manager.add_team_member(
+        team_id=request.team_id,
+        user_id=request.user_id,
+        role=request.role
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# ダッシュボード
+# ---------------------------------------------------------------------------
+
+@app.get("/api/v1/team-brain/dashboard/stats")
+async def get_team_brain_stats(user_id: str = Query(..., description="User ID")):
+    """
+    Team Brain ダッシュボード用統計情報を取得する
+    """
+    manager = get_team_brain_manager()
+    stats = manager.get_dashboard_stats(user_id)
+    return stats
+
 
 if __name__ == "__main__":
     import uvicorn
