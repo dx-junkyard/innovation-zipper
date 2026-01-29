@@ -767,3 +767,713 @@ class DBClient:
         finally:
             if cursor: cursor.close()
             if conn: conn.close()
+
+    # =========================================================================
+    # Team Brain: Hypothesis Management (FR-103, FR-104)
+    # =========================================================================
+
+    def create_hypothesis(
+        self,
+        user_id: str,
+        content: str,
+        original_experience: str = None,
+        tags: List[str] = None,
+        parent_hypothesis_id: str = None
+    ) -> Optional[str]:
+        """
+        Create a new hypothesis (1階: Private Layer).
+        """
+        conn = None
+        cursor = None
+        import uuid
+        import hashlib
+        hypothesis_id = str(uuid.uuid4())
+        user_hash = hashlib.sha256(user_id.encode()).hexdigest()[:16]
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor()
+            query = """
+                INSERT INTO hypotheses (
+                    id, origin_user_id, origin_user_id_hash, content,
+                    original_experience, tags, parent_hypothesis_id
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """
+            cursor.execute(query, (
+                hypothesis_id,
+                user_id,
+                user_hash,
+                content,
+                original_experience,
+                json.dumps(tags or [], ensure_ascii=False),
+                parent_hypothesis_id
+            ))
+            conn.commit()
+            print(f"[✓] Created hypothesis {hypothesis_id} for user {user_id}")
+            return hypothesis_id
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in create_hypothesis: {err}")
+            return None
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
+    def get_hypothesis(self, hypothesis_id: str) -> Optional[Dict[str, Any]]:
+        """Get a single hypothesis by ID."""
+        conn = None
+        cursor = None
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor(dictionary=True)
+            query = """
+                SELECT h.*,
+                       (SELECT COUNT(*) FROM hypothesis_verifications hv WHERE hv.hypothesis_id = h.id) as verification_count,
+                       (SELECT COUNT(*) FROM hypothesis_verifications hv WHERE hv.hypothesis_id = h.id AND hv.verification_result = 'SUCCESS') as success_count
+                FROM hypotheses h
+                WHERE h.id = %s
+            """
+            cursor.execute(query, (hypothesis_id,))
+            row = cursor.fetchone()
+            if row:
+                row = self._format_hypothesis_row(row)
+            return row
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in get_hypothesis: {err}")
+            return None
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
+    def get_user_hypotheses(
+        self,
+        user_id: str,
+        status: str = None,
+        verification_state: str = None,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get hypotheses for a user (1階: Private Layer).
+        """
+        conn = None
+        cursor = None
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor(dictionary=True)
+            query = """
+                SELECT h.*,
+                       (SELECT COUNT(*) FROM hypothesis_verifications hv WHERE hv.hypothesis_id = h.id) as verification_count
+                FROM hypotheses h
+                WHERE h.origin_user_id = %s
+            """
+            params = [user_id]
+            if status:
+                query += " AND h.status = %s"
+                params.append(status)
+            if verification_state:
+                query += " AND h.verification_state = %s"
+                params.append(verification_state)
+            query += " ORDER BY h.updated_at DESC LIMIT %s"
+            params.append(limit)
+            cursor.execute(query, tuple(params))
+            rows = cursor.fetchall()
+            return [self._format_hypothesis_row(row) for row in rows]
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in get_user_hypotheses: {err}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
+    def update_hypothesis(
+        self,
+        hypothesis_id: str,
+        user_id: str,
+        content: str = None,
+        status: str = None,
+        verification_state: str = None,
+        tags: List[str] = None
+    ) -> bool:
+        """Update hypothesis (ownership check included)."""
+        conn = None
+        cursor = None
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor()
+
+            # Build dynamic update
+            updates = []
+            params = []
+            if content is not None:
+                updates.append("content = %s")
+                params.append(content)
+            if status is not None:
+                updates.append("status = %s")
+                params.append(status)
+                if status == 'SHARED':
+                    updates.append("shared_at = NOW()")
+            if verification_state is not None:
+                updates.append("verification_state = %s")
+                params.append(verification_state)
+            if tags is not None:
+                updates.append("tags = %s")
+                params.append(json.dumps(tags, ensure_ascii=False))
+
+            if not updates:
+                return True
+
+            query = f"UPDATE hypotheses SET {', '.join(updates)} WHERE id = %s AND origin_user_id = %s"
+            params.extend([hypothesis_id, user_id])
+            cursor.execute(query, tuple(params))
+            conn.commit()
+            return cursor.rowcount > 0
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in update_hypothesis: {err}")
+            return False
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
+    def update_hypothesis_verification_state(
+        self,
+        hypothesis_id: str,
+        user_id: str,
+        verification_state: str
+    ) -> bool:
+        """Update hypothesis verification state (FR-104)."""
+        return self.update_hypothesis(
+            hypothesis_id, user_id,
+            verification_state=verification_state
+        )
+
+    def _format_hypothesis_row(self, row: Dict) -> Dict:
+        """Format hypothesis row for API response."""
+        if row.get('tags') and isinstance(row['tags'], str):
+            row['tags'] = json.loads(row['tags'])
+        if row.get('quality_score') and isinstance(row['quality_score'], str):
+            row['quality_score'] = json.loads(row['quality_score'])
+        if row.get('created_at'):
+            row['created_at'] = row['created_at'].isoformat()
+        if row.get('updated_at'):
+            row['updated_at'] = row['updated_at'].isoformat()
+        if row.get('shared_at'):
+            row['shared_at'] = row['shared_at'].isoformat()
+        return row
+
+    # =========================================================================
+    # Team Brain: Verification Management (FR-301)
+    # =========================================================================
+
+    def add_verification(
+        self,
+        hypothesis_id: str,
+        verifier_user_id: str,
+        verification_result: str,
+        conditions: str = None,
+        notes: str = None,
+        evidence: Dict = None,
+        verifier_team_id: str = None,
+        is_differential: bool = False,
+        parent_verification_id: int = None
+    ) -> Optional[int]:
+        """Add a verification result to a hypothesis."""
+        conn = None
+        cursor = None
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor()
+            query = """
+                INSERT INTO hypothesis_verifications (
+                    hypothesis_id, verifier_user_id, verifier_team_id,
+                    verification_result, conditions, notes, evidence,
+                    is_differential, parent_verification_id
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            cursor.execute(query, (
+                hypothesis_id,
+                verifier_user_id,
+                verifier_team_id,
+                verification_result,
+                conditions,
+                notes,
+                json.dumps(evidence, ensure_ascii=False) if evidence else None,
+                is_differential,
+                parent_verification_id
+            ))
+            conn.commit()
+            return cursor.lastrowid
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in add_verification: {err}")
+            return None
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
+    def get_hypothesis_verifications(
+        self,
+        hypothesis_id: str,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """Get all verifications for a hypothesis."""
+        conn = None
+        cursor = None
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor(dictionary=True)
+            query = """
+                SELECT hv.*, t.name as team_name
+                FROM hypothesis_verifications hv
+                LEFT JOIN teams t ON hv.verifier_team_id = t.id
+                WHERE hv.hypothesis_id = %s
+                ORDER BY hv.created_at DESC
+                LIMIT %s
+            """
+            cursor.execute(query, (hypothesis_id, limit))
+            rows = cursor.fetchall()
+            for row in rows:
+                if row.get('evidence') and isinstance(row['evidence'], str):
+                    row['evidence'] = json.loads(row['evidence'])
+                if row.get('created_at'):
+                    row['created_at'] = row['created_at'].isoformat()
+            return rows
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in get_hypothesis_verifications: {err}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
+    # =========================================================================
+    # Team Brain: Quality Scoring (FR-201)
+    # =========================================================================
+
+    def save_quality_score(
+        self,
+        hypothesis_id: str,
+        novelty_score: float,
+        specificity_score: float,
+        impact_score: float,
+        overall_score: float,
+        is_high_potential: bool,
+        scoring_rationale: str = None
+    ) -> Optional[int]:
+        """Save quality score for a hypothesis."""
+        conn = None
+        cursor = None
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor()
+
+            # Insert score record
+            query = """
+                INSERT INTO hypothesis_quality_scores (
+                    hypothesis_id, novelty_score, specificity_score,
+                    impact_score, overall_score, is_high_potential,
+                    scoring_rationale
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """
+            cursor.execute(query, (
+                hypothesis_id,
+                novelty_score,
+                specificity_score,
+                impact_score,
+                overall_score,
+                is_high_potential,
+                scoring_rationale
+            ))
+            score_id = cursor.lastrowid
+
+            # Update hypothesis with latest score
+            update_query = """
+                UPDATE hypotheses
+                SET quality_score = %s
+                WHERE id = %s
+            """
+            score_json = json.dumps({
+                "novelty": novelty_score,
+                "specificity": specificity_score,
+                "impact": impact_score,
+                "overall": overall_score,
+                "is_high_potential": is_high_potential
+            })
+            cursor.execute(update_query, (score_json, hypothesis_id))
+
+            conn.commit()
+            return score_id
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in save_quality_score: {err}")
+            return None
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
+    def get_high_potential_hypotheses(
+        self,
+        user_id: str = None,
+        limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        """Get hypotheses marked as high potential."""
+        conn = None
+        cursor = None
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor(dictionary=True)
+            query = """
+                SELECT h.*, hqs.overall_score, hqs.scoring_rationale
+                FROM hypotheses h
+                JOIN hypothesis_quality_scores hqs ON h.id = hqs.hypothesis_id
+                WHERE hqs.is_high_potential = TRUE
+            """
+            params = []
+            if user_id:
+                query += " AND h.origin_user_id = %s"
+                params.append(user_id)
+            query += " ORDER BY hqs.overall_score DESC LIMIT %s"
+            params.append(limit)
+            cursor.execute(query, tuple(params))
+            rows = cursor.fetchall()
+            return [self._format_hypothesis_row(row) for row in rows]
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in get_high_potential_hypotheses: {err}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
+    # =========================================================================
+    # Team Brain: Sharing Suggestions (FR-202)
+    # =========================================================================
+
+    def create_sharing_suggestion(
+        self,
+        hypothesis_id: str,
+        user_id: str,
+        suggestion_reason: str,
+        draft_content: str
+    ) -> Optional[int]:
+        """Create a sharing suggestion for a hypothesis."""
+        conn = None
+        cursor = None
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor()
+            query = """
+                INSERT INTO sharing_suggestions (
+                    hypothesis_id, user_id, suggestion_reason, draft_content
+                )
+                VALUES (%s, %s, %s, %s)
+            """
+            cursor.execute(query, (
+                hypothesis_id, user_id, suggestion_reason, draft_content
+            ))
+            conn.commit()
+            return cursor.lastrowid
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in create_sharing_suggestion: {err}")
+            return None
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
+    def get_pending_suggestions(
+        self,
+        user_id: str,
+        limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        """Get pending sharing suggestions for a user."""
+        conn = None
+        cursor = None
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor(dictionary=True)
+            query = """
+                SELECT ss.*, h.content as hypothesis_content
+                FROM sharing_suggestions ss
+                JOIN hypotheses h ON ss.hypothesis_id = h.id
+                WHERE ss.user_id = %s AND ss.status = 'PENDING'
+                ORDER BY ss.created_at DESC
+                LIMIT %s
+            """
+            cursor.execute(query, (user_id, limit))
+            rows = cursor.fetchall()
+            for row in rows:
+                if row.get('created_at'):
+                    row['created_at'] = row['created_at'].isoformat()
+            return rows
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in get_pending_suggestions: {err}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
+    def respond_to_suggestion(
+        self,
+        suggestion_id: int,
+        user_id: str,
+        status: str,
+        edited_content: str = None
+    ) -> bool:
+        """Respond to a sharing suggestion."""
+        conn = None
+        cursor = None
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor()
+            query = """
+                UPDATE sharing_suggestions
+                SET status = %s, edited_content = %s, responded_at = NOW()
+                WHERE id = %s AND user_id = %s
+            """
+            cursor.execute(query, (status, edited_content, suggestion_id, user_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in respond_to_suggestion: {err}")
+            return False
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
+    # =========================================================================
+    # Team Brain: Public Hypothesis Bank (FR-301)
+    # =========================================================================
+
+    def get_shared_hypotheses(
+        self,
+        team_id: str = None,
+        verification_state: str = None,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get shared hypotheses (3階: Public Layer).
+        Returns hypotheses with their verification status summary.
+        """
+        conn = None
+        cursor = None
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor(dictionary=True)
+            query = """
+                SELECT h.*,
+                       h.origin_user_id_hash as anonymous_author,
+                       (SELECT COUNT(*) FROM hypothesis_verifications hv WHERE hv.hypothesis_id = h.id) as total_verifications,
+                       (SELECT COUNT(*) FROM hypothesis_verifications hv WHERE hv.hypothesis_id = h.id AND hv.verification_result = 'SUCCESS') as success_count,
+                       (SELECT COUNT(*) FROM hypothesis_verifications hv WHERE hv.hypothesis_id = h.id AND hv.verification_result = 'FAILURE') as failure_count
+                FROM hypotheses h
+                WHERE h.status = 'SHARED'
+            """
+            params = []
+            if team_id:
+                query += " AND h.team_id = %s"
+                params.append(team_id)
+            if verification_state:
+                query += " AND h.verification_state = %s"
+                params.append(verification_state)
+            query += " ORDER BY h.shared_at DESC LIMIT %s"
+            params.append(limit)
+            cursor.execute(query, tuple(params))
+            rows = cursor.fetchall()
+
+            # Remove sensitive data and format
+            result = []
+            for row in rows:
+                row = self._format_hypothesis_row(row)
+                # Remove origin_user_id from public view
+                if 'origin_user_id' in row:
+                    del row['origin_user_id']
+                result.append(row)
+            return result
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in get_shared_hypotheses: {err}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
+    def share_hypothesis(
+        self,
+        hypothesis_id: str,
+        user_id: str,
+        team_id: str = None
+    ) -> bool:
+        """Share a hypothesis to the public layer."""
+        conn = None
+        cursor = None
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor()
+            query = """
+                UPDATE hypotheses
+                SET status = 'SHARED', team_id = %s, shared_at = NOW()
+                WHERE id = %s AND origin_user_id = %s AND status IN ('DRAFT', 'PROPOSED')
+            """
+            cursor.execute(query, (team_id, hypothesis_id, user_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in share_hypothesis: {err}")
+            return False
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
+    # =========================================================================
+    # Team Brain: Team Management
+    # =========================================================================
+
+    def create_team(
+        self,
+        name: str,
+        created_by: str,
+        description: str = None
+    ) -> Optional[str]:
+        """Create a new team."""
+        conn = None
+        cursor = None
+        import uuid
+        team_id = str(uuid.uuid4())
+        try:
+            conn = mysql.connector.connect(**self.config)
+            conn.start_transaction()
+            cursor = conn.cursor()
+
+            # Create team
+            query = """
+                INSERT INTO teams (id, name, description, created_by)
+                VALUES (%s, %s, %s, %s)
+            """
+            cursor.execute(query, (team_id, name, description, created_by))
+
+            # Add creator as owner
+            member_query = """
+                INSERT INTO team_members (team_id, user_id, role)
+                VALUES (%s, %s, 'owner')
+            """
+            cursor.execute(member_query, (team_id, created_by))
+
+            conn.commit()
+            return team_id
+        except mysql.connector.Error as err:
+            if conn: conn.rollback()
+            print(f"[✗] MySQL Error in create_team: {err}")
+            return None
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
+    def get_user_teams(self, user_id: str) -> List[Dict[str, Any]]:
+        """Get teams a user belongs to."""
+        conn = None
+        cursor = None
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor(dictionary=True)
+            query = """
+                SELECT t.*, tm.role,
+                       (SELECT COUNT(*) FROM team_members WHERE team_id = t.id) as member_count
+                FROM teams t
+                JOIN team_members tm ON t.id = tm.team_id
+                WHERE tm.user_id = %s
+                ORDER BY t.name
+            """
+            cursor.execute(query, (user_id,))
+            rows = cursor.fetchall()
+            for row in rows:
+                if row.get('created_at'):
+                    row['created_at'] = row['created_at'].isoformat()
+                if row.get('updated_at'):
+                    row['updated_at'] = row['updated_at'].isoformat()
+            return rows
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in get_user_teams: {err}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
+    def add_team_member(
+        self,
+        team_id: str,
+        user_id: str,
+        role: str = 'viewer'
+    ) -> bool:
+        """Add a member to a team."""
+        conn = None
+        cursor = None
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor()
+            query = """
+                INSERT INTO team_members (team_id, user_id, role)
+                VALUES (%s, %s, %s)
+                ON DUPLICATE KEY UPDATE role = VALUES(role)
+            """
+            cursor.execute(query, (team_id, user_id, role))
+            conn.commit()
+            return True
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in add_team_member: {err}")
+            return False
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
+    # =========================================================================
+    # Team Brain: Status-Aware RAG Support (FR-401)
+    # =========================================================================
+
+    def search_hypotheses_for_rag(
+        self,
+        keywords: List[str],
+        exclude_user_id: str = None,
+        include_verification_summary: bool = True,
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Search shared hypotheses for RAG retrieval.
+        Returns hypotheses with verification status metadata.
+        """
+        conn = None
+        cursor = None
+        try:
+            conn = mysql.connector.connect(**self.config)
+            cursor = conn.cursor(dictionary=True)
+
+            # Build LIKE conditions for keywords
+            keyword_conditions = " OR ".join(["h.content LIKE %s"] * len(keywords))
+            keyword_params = [f"%{kw}%" for kw in keywords]
+
+            query = f"""
+                SELECT h.id, h.content, h.verification_state, h.tags,
+                       h.origin_user_id_hash as author_hash,
+                       (SELECT COUNT(*) FROM hypothesis_verifications hv WHERE hv.hypothesis_id = h.id) as total_verifications,
+                       (SELECT COUNT(*) FROM hypothesis_verifications hv WHERE hv.hypothesis_id = h.id AND hv.verification_result = 'SUCCESS') as success_count,
+                       (SELECT COUNT(*) FROM hypothesis_verifications hv WHERE hv.hypothesis_id = h.id AND hv.verification_result = 'FAILURE') as failure_count,
+                       (SELECT GROUP_CONCAT(DISTINCT CONCAT(t.name, ':', hv2.verification_result) SEPARATOR '; ')
+                        FROM hypothesis_verifications hv2
+                        LEFT JOIN teams t ON hv2.verifier_team_id = t.id
+                        WHERE hv2.hypothesis_id = h.id) as verification_summary
+                FROM hypotheses h
+                WHERE h.status = 'SHARED'
+                  AND ({keyword_conditions})
+            """
+            params = keyword_params.copy()
+
+            if exclude_user_id:
+                query += " AND h.origin_user_id != %s"
+                params.append(exclude_user_id)
+
+            query += " ORDER BY h.verification_state = 'VALIDATED' DESC, h.shared_at DESC LIMIT %s"
+            params.append(limit)
+
+            cursor.execute(query, tuple(params))
+            rows = cursor.fetchall()
+            return [self._format_hypothesis_row(row) for row in rows]
+        except mysql.connector.Error as err:
+            print(f"[✗] MySQL Error in search_hypotheses_for_rag: {err}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
