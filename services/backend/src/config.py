@@ -50,17 +50,17 @@ class EmbeddingConfig:
 # =============================================================================
 # Local LLM Model Definitions (Ollama)
 # =============================================================================
-LOCAL_MODEL_FAST = "llama3.2"           # 速度・コスト重視（ゼロコスト）
-LOCAL_MODEL_SMART = "llama3.2"          # 品質重視（ローカル最高性能）
-LOCAL_EMBEDDING_MODEL = "mxbai-embed-large"  # Ollama embedding model
-LOCAL_EMBEDDING_DIMENSION = 1024        # mxbai-embed-large dimension
+LOCAL_MODEL_FAST = "deepseek-r1:32b"           # 速度・コスト重視（ゼロコスト）
+LOCAL_MODEL_SMART = "deepseek-r1:32b"          # 品質重視（ローカル最高性能）
+LOCAL_EMBEDDING_MODEL = "embeddinggemma"  # Ollama embedding model
+LOCAL_EMBEDDING_DIMENSION = 2048        # mxbai-embed-large dimension
 
 
 # =============================================================================
 # Cloud LLM Model Definitions (OpenAI)
 # =============================================================================
-CLOUD_MODEL_FAST = "gpt-4o-mini"         # 速度・コスト重視
-CLOUD_MODEL_SMART = "gpt-4o"             # 品質・推論能力重視
+CLOUD_MODEL_FAST = "gpt-5-mini"         # 速度・コスト重視
+CLOUD_MODEL_SMART = "gpt-5.2"             # 品質・推論能力重視
 CLOUD_EMBEDDING_MODEL = "text-embedding-3-small"  # OpenAI embedding model
 CLOUD_EMBEDDING_DIMENSION = 1536         # text-embedding-3-small dimension
 
@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     CLOUD_EMBEDDING_DIMENSION: int = CLOUD_EMBEDDING_DIMENSION
 
     # --- Legacy Settings (for backward compatibility) ---
-    LLM_MODEL: str = "gpt-4o-mini"  # Deprecated: Use task-specific configs
+    LLM_MODEL: str = "gpt-5-mini"  # Deprecated: Use task-specific configs
     EMBEDDING_MODEL: str = "text-embedding-3-small"  # Deprecated
     EMBEDDING_DIMENSION: int = 1536  # Deprecated
 
