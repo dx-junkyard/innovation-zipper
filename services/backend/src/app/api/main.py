@@ -1021,6 +1021,166 @@ async def check_session(request: Request):
     return {"authenticated": False, "user_id": None}
 
 
+# LINE OAuth URLs
+LINE_TOKEN_URL = "https://api.line.me/oauth2/v2.1/token"
+LINE_PROFILE_URL = "https://api.line.me/v2/profile"
+
+
+@app.get("/api/v1/auth/callback")
+async def line_auth_callback(
+    code: str = Query(..., description="LINE OAuth authorization code"),
+    state: Optional[str] = Query(None, description="OAuth state parameter")
+):
+    """
+    LINE OAuth コールバックを処理する。
+
+    ブラウザから直接呼び出されるエンドポイント。
+    認証成功後、session_id Cookieをセットし、UIへリダイレクトする。
+    これにより、Chrome拡張も同じCookieを共有してAPI認証が可能になる。
+    """
+    # 環境変数から認証情報を取得
+    channel_id = os.environ.get("LINE_CHANNEL_ID")
+    channel_secret = os.environ.get("LINE_CHANNEL_SECRET")
+    redirect_uri = os.environ.get("LINE_REDIRECT_URI", "http://localhost:8086/api/v1/auth/callback")
+    web_app_url = os.environ.get("WEB_APP_URL", "http://localhost:8080")
+
+    if not channel_id or not channel_secret:
+        logger.error("LINE credentials not configured")
+        return RedirectResponse(
+            url=f"{web_app_url}?auth_error=server_config",
+            status_code=302
+        )
+
+    # 1. アクセストークンの取得
+    token_data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "client_id": channel_id,
+        "client_secret": channel_secret
+    }
+
+    try:
+        token_response = requests.post(
+            LINE_TOKEN_URL,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            data=token_data
+        )
+        token_response.raise_for_status()
+        tokens = token_response.json()
+        access_token = tokens.get("access_token")
+    except Exception as e:
+        logger.error(f"LINE token exchange failed: {e}")
+        return RedirectResponse(
+            url=f"{web_app_url}?auth_error=token_exchange",
+            status_code=302
+        )
+
+    # 2. ユーザープロフィールの取得
+    try:
+        profile_response = requests.get(
+            LINE_PROFILE_URL,
+            headers={"Authorization": f"Bearer {access_token}"}
+        )
+        profile_response.raise_for_status()
+        profile = profile_response.json()
+        line_user_id = profile.get("userId")
+        display_name = profile.get("displayName", "")
+    except Exception as e:
+        logger.error(f"LINE profile fetch failed: {e}")
+        return RedirectResponse(
+            url=f"{web_app_url}?auth_error=profile_fetch",
+            status_code=302
+        )
+
+    # 3. ユーザーの作成または取得 (Upsert)
+    repo = DBClient()
+    user_id = repo.create_user(line_user_id=line_user_id)
+
+    # 4. セッションIDを発行
+    import secrets
+    session_id = secrets.token_urlsafe(32)
+
+    # セッション情報をRedisに保存（オプション: より堅牢なセッション管理）
+    try:
+        redis_url = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
+        r = redis.from_url(redis_url)
+        session_data = json.dumps({
+            "user_id": user_id,
+            "line_user_id": line_user_id,
+            "display_name": display_name
+        })
+        # セッションは24時間有効
+        r.setex(f"session:{session_id}", 86400, session_data)
+    except Exception as e:
+        logger.warning(f"Failed to save session to Redis: {e}")
+
+    # 5. レスポンス作成: Cookieをセットしてリダイレクト
+    # auth_tokenをURLに含めてUI側でログイン状態を同期
+    auth_token = secrets.token_urlsafe(16)
+
+    # 一時トークンをRedisに保存（5分間有効）
+    try:
+        r.setex(f"auth_token:{auth_token}", 300, json.dumps({
+            "user_id": user_id,
+            "line_user_id": line_user_id,
+            "display_name": display_name
+        }))
+    except Exception as e:
+        logger.warning(f"Failed to save auth token to Redis: {e}")
+
+    redirect_url = f"{web_app_url}?auth_token={auth_token}"
+    response = RedirectResponse(url=redirect_url, status_code=302)
+
+    # Cookieをセット（ブラウザがAPIドメインのCookieを保持）
+    response.set_cookie(
+        key="session_id",
+        value=session_id,
+        httponly=True,
+        path="/",
+        samesite="lax",
+        max_age=86400  # 24時間
+    )
+    response.set_cookie(
+        key="user_id",
+        value=user_id,
+        httponly=False,  # JSからアクセス可能にする
+        path="/",
+        samesite="lax",
+        max_age=86400
+    )
+
+    logger.info(f"LINE auth successful for user {user_id}, redirecting to {web_app_url}")
+    return response
+
+
+@app.get("/api/v1/auth/verify-token")
+async def verify_auth_token(token: str = Query(..., description="Temporary auth token")):
+    """
+    一時認証トークンを検証し、ユーザー情報を返す。
+    UI側でログイン状態を復元するために使用。
+    """
+    try:
+        redis_url = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
+        r = redis.from_url(redis_url)
+        token_data = r.get(f"auth_token:{token}")
+
+        if token_data:
+            # トークンを消費（1回限り有効）
+            r.delete(f"auth_token:{token}")
+            user_info = json.loads(token_data)
+            return {
+                "valid": True,
+                "user_id": user_info.get("user_id"),
+                "line_user_id": user_info.get("line_user_id"),
+                "display_name": user_info.get("display_name")
+            }
+    except Exception as e:
+        logger.error(f"Failed to verify auth token: {e}")
+
+    return {"valid": False, "user_id": None}
+
+
 @app.post("/api/v1/hypothesis/draft")
 async def generate_hypothesis_draft(request: HypothesisDraftRequest):
     """
