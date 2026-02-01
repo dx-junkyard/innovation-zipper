@@ -15,6 +15,15 @@ from app.tasks.wikipedia_import import (
     ImportJobManager,
     NOTIFICATION_CHANNEL
 )
+from config import (
+    EmbeddingConfig,
+    TASK_WIKI_EMBEDDING,
+    TASK_USER_DOCUMENT_EMBEDDING,
+    TASK_RAG_SEARCH_EMBEDDING,
+    PROVIDER_LOCAL,
+    PROVIDER_OPENAI,
+    settings,
+)
 import logging
 from dotenv import load_dotenv
 
@@ -42,16 +51,31 @@ class ImportRequest(BaseModel):
     items: List[KnowledgeItem]
 
 
+class EmbeddingConfigRequest(BaseModel):
+    """Embedding configuration for hybrid model support."""
+    provider: str = Field(default="local", description="Provider: 'local' or 'openai'")
+    model: str = Field(default="mxbai-embed-large", description="Embedding model name")
+    dimension: int = Field(default=1024, description="Vector dimension")
+
+
 class WikipediaImportRequest(BaseModel):
     file_path: str = Field(..., description="Path to Wikipedia dump file (.xml.bz2)")
     batch_size: int = Field(default=100, description="Number of articles per batch")
     max_articles: Optional[int] = Field(default=None, description="Maximum articles to import")
     min_content_length: int = Field(default=100, description="Minimum content length")
+    embedding_config: Optional[EmbeddingConfigRequest] = Field(
+        default=None,
+        description="Embedding configuration (default: Local LLM for cost-effective processing)"
+    )
 
 
 class EmbeddingProcessRequest(BaseModel):
     batch_size: int = Field(default=50, description="Number of items per batch")
     max_batches: Optional[int] = Field(default=None, description="Maximum batches to process")
+    embedding_config: Optional[EmbeddingConfigRequest] = Field(
+        default=None,
+        description="Embedding configuration (default: Local LLM)"
+    )
 
 @app.post("/api/v1/admin/knowledge/import-raw")
 def import_raw_knowledge(request: ImportRequest):
@@ -177,6 +201,9 @@ async def upload_wikipedia_dump(file: UploadFile = File(...)):
 async def start_wikipedia_import(request: WikipediaImportRequest):
     """
     Start a Wikipedia dump import job.
+
+    By default, uses Local LLM embedding (TASK_WIKI_EMBEDDING) for cost-effective processing.
+    You can override this by providing embedding_config in the request.
     """
     # Validate file exists
     if not os.path.exists(request.file_path):
@@ -191,11 +218,21 @@ async def start_wikipedia_import(request: WikipediaImportRequest):
     # Create job manager
     job_manager = ImportJobManager(job_id)
 
+    # Prepare embedding config
+    embedding_config_dict = None
+    if request.embedding_config:
+        embedding_config_dict = {
+            "provider": request.embedding_config.provider,
+            "model": request.embedding_config.model,
+            "dimension": request.embedding_config.dimension
+        }
+
     # Create job record
     config = {
         "batch_size": request.batch_size,
         "max_articles": request.max_articles,
-        "min_content_length": request.min_content_length
+        "min_content_length": request.min_content_length,
+        "embedding_config": embedding_config_dict or TASK_WIKI_EMBEDDING.to_dict()
     }
     job_data = job_manager.create_job(request.file_path, config)
 
@@ -205,7 +242,8 @@ async def start_wikipedia_import(request: WikipediaImportRequest):
         file_path=request.file_path,
         batch_size=request.batch_size,
         max_articles=request.max_articles,
-        min_content_length=request.min_content_length
+        min_content_length=request.min_content_length,
+        embedding_config=embedding_config_dict
     )
 
     return {
@@ -213,6 +251,7 @@ async def start_wikipedia_import(request: WikipediaImportRequest):
         "job_id": job_id,
         "task_id": str(task.id),
         "message": "Wikipedia import job started",
+        "embedding_config": config["embedding_config"],
         "job": job_data
     }
 
@@ -270,16 +309,30 @@ async def cancel_wikipedia_job(job_id: str):
 async def start_embedding_processing(request: EmbeddingProcessRequest):
     """
     Start background processing of pending embeddings.
+
+    By default, uses Local LLM embedding (TASK_WIKI_EMBEDDING) for cost-effective processing.
+    You can override this by providing embedding_config in the request.
     """
+    # Prepare embedding config
+    embedding_config_dict = None
+    if request.embedding_config:
+        embedding_config_dict = {
+            "provider": request.embedding_config.provider,
+            "model": request.embedding_config.model,
+            "dimension": request.embedding_config.dimension
+        }
+
     task = process_wikipedia_embeddings_task.delay(
         batch_size=request.batch_size,
-        max_batches=request.max_batches
+        max_batches=request.max_batches,
+        embedding_config=embedding_config_dict
     )
 
     return {
         "status": "started",
         "task_id": str(task.id),
-        "message": "Embedding processing task started"
+        "message": "Embedding processing task started",
+        "embedding_config": embedding_config_dict or TASK_WIKI_EMBEDDING.to_dict()
     }
 
 
@@ -444,3 +497,160 @@ async def get_admin_stats():
             "status": "error",
             "message": str(e)
         }
+
+
+# =============================================================================
+# Hybrid Model Configuration API Endpoints
+# =============================================================================
+
+@app.get("/api/v1/admin/config/hybrid-model")
+async def get_hybrid_model_config():
+    """
+    Get current hybrid model configuration for LLM and embedding tasks.
+    """
+    from config import (
+        TASK_CAPTURE_FILTERING,
+        TASK_HOT_CACHE,
+        TASK_INTENT_ROUTING,
+        TASK_INTEREST_EXPLORATION,
+        TASK_SITUATION_ANALYSIS,
+        TASK_HYPOTHESIS_GENERATION,
+        TASK_STRUCTURAL_ANALYSIS,
+        TASK_INNOVATION_SYNTHESIS,
+        TASK_GAP_ANALYSIS,
+        TASK_REPORT_GENERATION,
+        TASK_RESPONSE_PLANNING,
+    )
+
+    return {
+        "status": "success",
+        "config": {
+            "providers": {
+                "local": {
+                    "fast_model": settings.LOCAL_MODEL_FAST,
+                    "smart_model": settings.LOCAL_MODEL_SMART,
+                    "embedding_model": settings.LOCAL_EMBEDDING_MODEL,
+                    "embedding_dimension": settings.LOCAL_EMBEDDING_DIMENSION,
+                },
+                "openai": {
+                    "fast_model": settings.CLOUD_MODEL_FAST,
+                    "smart_model": settings.CLOUD_MODEL_SMART,
+                    "embedding_model": settings.CLOUD_EMBEDDING_MODEL,
+                    "embedding_dimension": settings.CLOUD_EMBEDDING_DIMENSION,
+                }
+            },
+            "task_assignments": {
+                "llm_tasks": {
+                    "capture_filtering": TASK_CAPTURE_FILTERING.to_dict(),
+                    "hot_cache": TASK_HOT_CACHE.to_dict(),
+                    "intent_routing": TASK_INTENT_ROUTING.to_dict(),
+                    "interest_exploration": TASK_INTEREST_EXPLORATION.to_dict(),
+                    "situation_analysis": TASK_SITUATION_ANALYSIS.to_dict(),
+                    "hypothesis_generation": TASK_HYPOTHESIS_GENERATION.to_dict(),
+                    "structural_analysis": TASK_STRUCTURAL_ANALYSIS.to_dict(),
+                    "innovation_synthesis": TASK_INNOVATION_SYNTHESIS.to_dict(),
+                    "gap_analysis": TASK_GAP_ANALYSIS.to_dict(),
+                    "report_generation": TASK_REPORT_GENERATION.to_dict(),
+                    "response_planning": TASK_RESPONSE_PLANNING.to_dict(),
+                },
+                "embedding_tasks": {
+                    "wiki_embedding": TASK_WIKI_EMBEDDING.to_dict(),
+                    "user_document_embedding": TASK_USER_DOCUMENT_EMBEDDING.to_dict(),
+                    "rag_search_embedding": TASK_RAG_SEARCH_EMBEDDING.to_dict(),
+                }
+            }
+        }
+    }
+
+
+@app.get("/api/v1/admin/collections")
+async def list_knowledge_collections():
+    """
+    List all knowledge base collections with their metadata.
+    Shows collections for different embedding models.
+    """
+    km = KnowledgeManager()
+
+    try:
+        collections = km.list_available_collections()
+
+        # Also get pending embedding counts for each collection
+        for collection in collections:
+            try:
+                # Try to extract embedding info from collection name
+                name = collection["name"]
+                if name.startswith("knowledge_base_"):
+                    suffix = name[len("knowledge_base_"):]
+                    # Format: model_dimension
+                    parts = suffix.rsplit("_", 1)
+                    if len(parts) == 2:
+                        collection["embedding_model"] = parts[0].replace("_", "-")
+                        collection["dimension"] = int(parts[1])
+            except Exception:
+                pass
+
+        return {
+            "status": "success",
+            "collections": collections,
+            "current_collection": km.collection_name,
+            "current_embedding_config": km.embedding_config.to_dict()
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to list collections: {e}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "collections": []
+        }
+
+
+@app.get("/api/v1/admin/collections/{collection_name}/stats")
+async def get_collection_stats(collection_name: str):
+    """
+    Get detailed statistics for a specific collection.
+    """
+    km = KnowledgeManager()
+
+    try:
+        if not km.qdrant_client.collection_exists(collection_name):
+            raise HTTPException(status_code=404, detail=f"Collection not found: {collection_name}")
+
+        info = km.qdrant_client.get_collection(collection_name)
+
+        # Count pending embeddings
+        pending_count = 0
+        try:
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            count_result = km.qdrant_client.count(
+                collection_name=collection_name,
+                count_filter=Filter(
+                    must=[
+                        FieldCondition(
+                            key="meta.is_embedded",
+                            match=MatchValue(value=False)
+                        )
+                    ]
+                )
+            )
+            pending_count = count_result.count
+        except Exception:
+            pass
+
+        return {
+            "status": "success",
+            "collection": {
+                "name": collection_name,
+                "points_count": info.points_count,
+                "vectors_count": info.vectors_count,
+                "status": info.status.value,
+                "pending_embeddings": pending_count,
+                "embedded_count": info.points_count - pending_count if info.points_count else 0
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get collection stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

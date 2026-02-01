@@ -6,6 +6,7 @@ import json
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../.."))
 
 from app.api.components.rag_manager import RAGManager
+from app.api.ai_client import AIClient
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -47,15 +48,20 @@ def test_rag():
         print(f"[!] Could not load mock embedding: {e}")
 
     try:
-        rag_manager = RAGManager()
+        # Initialize AIClient and RAGManager
+        ai_client = AIClient()
+        rag_manager = RAGManager(ai_client)
         result = rag_manager.retrieve_knowledge(context)
 
-        evidence = result.get("retrieval_evidence", {}).get("service_candidates", [])
-        print(f"Found {len(evidence)} candidates.")
+        evidence = result.get("retrieval_evidence", {}).get("results", [])
+        print(f"Found {len(evidence)} results.")
 
         for item in evidence:
-            print(f"- {item['name']} (Score: {item.get('score')})")
-            print(f"  Summary: {item['summary'][:50]}...")
+            title = item.get('title') or item.get('meta', {}).get('title', 'Unknown')
+            print(f"- {title} (Score: {item.get('score')})")
+            content = item.get('content', '')
+            if content:
+                print(f"  Content: {content[:50]}...")
 
     except Exception as e:
         print(f"[✗] Test failed: {e}")

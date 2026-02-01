@@ -1,0 +1,16 @@
+{
+  "name": "team-brain-extension",
+  "version": "1.0.0",
+  "description": "Team Brain Chrome Extension - 閲覧中のWebページから仮説を自動生成",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "clean": "rm -rf dist team-brain-extension.zip"
+  },
+  "keywords": [
+    "chrome-extension",
+    "team-brain",
+    "hypothesis"
+  ],
+  "author": "Team Brain",
+  "license": "MIT"
+}

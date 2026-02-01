@@ -18,6 +18,7 @@ from app.api.state_manager import StateManager
 from app.api.components.knowledge_manager import KnowledgeManager
 from app.api.components.graph_manager import GraphManager
 from app.api.components.topic_client import TopicClient
+from app.api.components.team_brain import TeamBrainManager
 from app.tasks.analysis import run_workflow_task, process_capture_task, process_document_task, save_analysis_result_task
 from pydantic import BaseModel, Field, HttpUrl
 import requests
@@ -82,6 +83,82 @@ class CaptureRequest(BaseModel):
 class TopicDeepDiveRequest(BaseModel):
     user_id: str
     topic: str
+
+
+# =============================================================================
+# Team Brain Request Models
+# =============================================================================
+
+class HypothesisIncubateRequest(BaseModel):
+    user_id: str
+    experience: str
+    interest_profile: Optional[Dict[str, Any]] = None
+    auto_score: bool = True
+    check_sharing: bool = True
+
+class HypothesisRefineRequest(BaseModel):
+    user_id: str
+    hypothesis_id: str
+    feedback: str
+
+class HypothesisUpdateVerificationRequest(BaseModel):
+    user_id: str
+    hypothesis_id: str
+    verification_state: str  # UNVERIFIED, IN_PROGRESS, VALIDATED, FAILED
+    notes: Optional[str] = None
+
+class SuggestionResponseRequest(BaseModel):
+    suggestion_id: int
+    user_id: str
+    action: str  # accept, reject, edit
+    edited_content: Optional[str] = None
+    team_id: Optional[str] = None
+
+class AddVerificationRequest(BaseModel):
+    user_id: str
+    hypothesis_id: str
+    verification_result: str  # SUCCESS, FAILURE, PARTIAL, INCONCLUSIVE
+    conditions: Optional[str] = None
+    notes: Optional[str] = None
+    evidence: Optional[Dict[str, Any]] = None
+    team_id: Optional[str] = None
+
+class CollectiveWisdomRequest(BaseModel):
+    user_id: str
+    thought: str
+    category: Optional[str] = None
+
+class DifferentialVerificationRequest(BaseModel):
+    user_id: str
+    hypothesis_id: str
+    new_conditions: str
+
+class RecordDifferentialRequest(BaseModel):
+    user_id: str
+    parent_hypothesis_id: str
+    verification_result: str
+    conditions: str
+    notes: Optional[str] = None
+    evidence: Optional[Dict[str, Any]] = None
+    team_id: Optional[str] = None
+
+class CreateTeamRequest(BaseModel):
+    name: str
+    created_by: str
+    description: Optional[str] = None
+
+
+class HypothesisDraftRequest(BaseModel):
+    """Chrome拡張からの仮説ドラフト生成リクエスト"""
+    url: str
+    title: str
+    content: str
+    user_id: Optional[str] = "extension-user"
+
+class AddTeamMemberRequest(BaseModel):
+    team_id: str
+    user_id: str
+    role: str = "viewer"
 
 
 @app.post("/api/v1/webhook/capture")
@@ -732,6 +809,710 @@ async def get_user_contents(user_id: str = Query(..., description="User ID")):
     repo = DBClient()
     contents = repo.get_all_user_contents(user_id)
     return {"contents": contents}
+
+
+# =============================================================================
+# Chrome Extension - Dynamic ZIP Generation & Session API
+# =============================================================================
+
+from pathlib import Path
+from langchain_core.prompts import PromptTemplate
+from config import MODEL_HYPOTHESIS_GENERATION
+import zipfile
+import tempfile
+import shutil
+
+
+def _get_extension_source_path() -> Optional[Path]:
+    """拡張機能のソースディレクトリまたはベースZIPを取得"""
+    # 環境変数で明示的に指定されている場合
+    env_path = os.environ.get("EXTENSION_SOURCE_PATH")
+    if env_path:
+        return Path(env_path)
+
+    # 開発環境: main.pyから相対パスで辿る
+    try:
+        current_file = Path(__file__).resolve()
+        for i in range(len(current_file.parents)):
+            # ソースディレクトリを優先
+            src_candidate = current_file.parents[i] / "extension/src"
+            if src_candidate.exists():
+                return current_file.parents[i] / "extension"
+            # ビルド済みZIPも確認
+            zip_candidate = current_file.parents[i] / "extension/team-brain-extension.zip"
+            if zip_candidate.exists():
+                return zip_candidate
+    except (IndexError, Exception):
+        pass
+
+    # Docker環境
+    docker_paths = [
+        Path("/app/static/extension"),
+        Path("/app/extension"),
+    ]
+    for p in docker_paths:
+        if p.exists():
+            return p
+
+    return None
+
+
+EXTENSION_SOURCE_PATH = _get_extension_source_path()
+
+
+def _generate_dynamic_config_js(api_url: str, web_app_url: str, line_channel_id: str) -> str:
+    """動的にconfig.jsを生成"""
+    return f'''/**
+ * Team Brain Extension - Configuration
+ * このファイルはBackendの動的ZIP生成時に自動生成されました。
+ */
+
+const TEAM_BRAIN_CONFIG = {{
+  API_URL: '{api_url}',
+  LINE_CHANNEL_ID: '{line_channel_id}',
+  WEB_APP_URL: '{web_app_url}',
+  VERSION: '1.0.0',
+  DEBUG: false
+}};
+
+if (typeof window !== 'undefined') {{
+  window.TEAM_BRAIN_CONFIG = TEAM_BRAIN_CONFIG;
+}}
+'''
+
+
+def _create_dynamic_extension_zip() -> Optional[bytes]:
+    """動的に設定を注入した拡張機能ZIPを生成"""
+    if EXTENSION_SOURCE_PATH is None:
+        return None
+
+    # 環境変数から設定を取得
+    api_url = os.environ.get("API_PUBLIC_URL", "http://localhost:8086")
+    web_app_url = os.environ.get("WEB_APP_URL", "http://localhost:8080")
+    line_channel_id = os.environ.get("LINE_CHANNEL_ID", "")
+
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            output_zip_path = temp_path / "extension.zip"
+
+            if EXTENSION_SOURCE_PATH.is_file() and EXTENSION_SOURCE_PATH.suffix == '.zip':
+                # ベースZIPを展開して設定を注入
+                extract_path = temp_path / "extracted"
+                with zipfile.ZipFile(EXTENSION_SOURCE_PATH, 'r') as zip_ref:
+                    zip_ref.extractall(extract_path)
+
+                # config.jsを上書き
+                config_path = extract_path / "src" / "config.js"
+                config_path.write_text(_generate_dynamic_config_js(api_url, web_app_url, line_channel_id))
+
+                # 再圧縮
+                with zipfile.ZipFile(output_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    for file_path in extract_path.rglob('*'):
+                        if file_path.is_file():
+                            arcname = file_path.relative_to(extract_path)
+                            zipf.write(file_path, arcname)
+
+            elif EXTENSION_SOURCE_PATH.is_dir():
+                # ソースディレクトリから直接ZIPを生成
+                with zipfile.ZipFile(output_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    # manifest.json
+                    manifest_path = EXTENSION_SOURCE_PATH / "manifest.json"
+                    if manifest_path.exists():
+                        zipf.write(manifest_path, "manifest.json")
+
+                    # src/ディレクトリ
+                    src_dir = EXTENSION_SOURCE_PATH / "src"
+                    if src_dir.exists():
+                        for file_path in src_dir.rglob('*'):
+                            if file_path.is_file():
+                                arcname = "src" / file_path.relative_to(src_dir)
+                                # config.jsは動的に生成
+                                if file_path.name == "config.js":
+                                    zipf.writestr(str(arcname), _generate_dynamic_config_js(api_url, web_app_url, line_channel_id))
+                                else:
+                                    zipf.write(file_path, arcname)
+
+                    # icons/ディレクトリ
+                    icons_dir = EXTENSION_SOURCE_PATH / "icons"
+                    if icons_dir.exists():
+                        for file_path in icons_dir.rglob('*'):
+                            if file_path.is_file() and file_path.suffix == '.png':
+                                arcname = "icons" / file_path.relative_to(icons_dir)
+                                zipf.write(file_path, arcname)
+            else:
+                return None
+
+            # ZIPファイルの内容を読み取って返す
+            return output_zip_path.read_bytes()
+
+    except Exception as e:
+        logger.error(f"Failed to create dynamic extension ZIP: {e}")
+        return None
+
+
+@app.get("/api/v1/extension/download")
+async def download_extension():
+    """
+    動的に設定を注入したChrome拡張をダウンロードする。
+    環境変数から API_PUBLIC_URL, WEB_APP_URL, LINE_CHANNEL_ID を読み取り、
+    config.js に埋め込んだZIPを生成して返す。
+    """
+    zip_content = _create_dynamic_extension_zip()
+
+    if zip_content is None:
+        raise HTTPException(
+            status_code=404,
+            detail="拡張機能のソースが見つかりません。"
+        )
+
+    # StreamingResponseでバイナリを返す
+    from fastapi.responses import Response
+    return Response(
+        content=zip_content,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": "attachment; filename=team-brain-extension.zip"
+        }
+    )
+
+
+@app.get("/api/v1/extension/info")
+async def get_extension_info():
+    """
+    Chrome拡張の情報とインストール手順を取得する。
+    """
+    is_available = EXTENSION_SOURCE_PATH is not None
+
+    return {
+        "available": is_available,
+        "version": "1.0.0",
+        "filename": "team-brain-extension.zip",
+        "install_instructions": [
+            "1. 「拡張機能をダウンロード」ボタンをクリックしてzipファイルをダウンロード",
+            "2. ダウンロードしたzipファイルを展開",
+            "3. Chromeで chrome://extensions/ を開く",
+            "4. 右上の「デベロッパーモード」をONにする",
+            "5. 「パッケージ化されていない拡張機能を読み込む」をクリック",
+            "6. 展開したフォルダを選択してインストール完了"
+        ]
+    }
+
+
+@app.get("/api/v1/auth/session")
+async def check_session(request: Request):
+    """
+    セッションの認証状態を確認する。
+    Chrome拡張からセッションCookieを使って認証状態を確認するためのエンドポイント。
+    """
+    # セッションCookieからユーザーIDを取得
+    # 注: 実際の実装はセッション管理方式に依存
+    session_id = request.cookies.get("session_id")
+    user_id = request.cookies.get("user_id")
+
+    if user_id:
+        return {"authenticated": True, "user_id": user_id}
+
+    if session_id:
+        # セッションIDからユーザー情報を取得（実装は省略）
+        # ここではセッションIDがあれば認証済みとみなす
+        return {"authenticated": True, "user_id": session_id}
+
+    return {"authenticated": False, "user_id": None}
+
+
+# LINE OAuth URLs
+LINE_TOKEN_URL = "https://api.line.me/oauth2/v2.1/token"
+LINE_PROFILE_URL = "https://api.line.me/v2/profile"
+
+
+@app.get("/api/v1/auth/callback")
+async def line_auth_callback(
+    code: str = Query(..., description="LINE OAuth authorization code"),
+    state: Optional[str] = Query(None, description="OAuth state parameter")
+):
+    """
+    LINE OAuth コールバックを処理する。
+
+    ブラウザから直接呼び出されるエンドポイント。
+    認証成功後、session_id Cookieをセットし、UIへリダイレクトする。
+    これにより、Chrome拡張も同じCookieを共有してAPI認証が可能になる。
+    """
+    # 環境変数から認証情報を取得
+    channel_id = os.environ.get("LINE_CHANNEL_ID")
+    channel_secret = os.environ.get("LINE_CHANNEL_SECRET")
+    redirect_uri = os.environ.get("LINE_REDIRECT_URI", "http://localhost:8086/api/v1/auth/callback")
+    web_app_url = os.environ.get("WEB_APP_URL", "http://localhost:8080")
+
+    if not channel_id or not channel_secret:
+        logger.error("LINE credentials not configured")
+        return RedirectResponse(
+            url=f"{web_app_url}?auth_error=server_config",
+            status_code=302
+        )
+
+    # 1. アクセストークンの取得
+    token_data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "client_id": channel_id,
+        "client_secret": channel_secret
+    }
+
+    try:
+        token_response = requests.post(
+            LINE_TOKEN_URL,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            data=token_data
+        )
+        token_response.raise_for_status()
+        tokens = token_response.json()
+        access_token = tokens.get("access_token")
+    except Exception as e:
+        logger.error(f"LINE token exchange failed: {e}")
+        return RedirectResponse(
+            url=f"{web_app_url}?auth_error=token_exchange",
+            status_code=302
+        )
+
+    # 2. ユーザープロフィールの取得
+    try:
+        profile_response = requests.get(
+            LINE_PROFILE_URL,
+            headers={"Authorization": f"Bearer {access_token}"}
+        )
+        profile_response.raise_for_status()
+        profile = profile_response.json()
+        line_user_id = profile.get("userId")
+        display_name = profile.get("displayName", "")
+    except Exception as e:
+        logger.error(f"LINE profile fetch failed: {e}")
+        return RedirectResponse(
+            url=f"{web_app_url}?auth_error=profile_fetch",
+            status_code=302
+        )
+
+    # 3. ユーザーの作成または取得 (Upsert)
+    repo = DBClient()
+    user_id = repo.create_user(line_user_id=line_user_id)
+
+    # 4. セッションIDを発行
+    import secrets
+    session_id = secrets.token_urlsafe(32)
+
+    # セッション情報をRedisに保存（オプション: より堅牢なセッション管理）
+    try:
+        redis_url = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
+        r = redis.from_url(redis_url)
+        session_data = json.dumps({
+            "user_id": user_id,
+            "line_user_id": line_user_id,
+            "display_name": display_name
+        })
+        # セッションは24時間有効
+        r.setex(f"session:{session_id}", 86400, session_data)
+    except Exception as e:
+        logger.warning(f"Failed to save session to Redis: {e}")
+
+    # 5. レスポンス作成: Cookieをセットしてリダイレクト
+    # auth_tokenをURLに含めてUI側でログイン状態を同期
+    auth_token = secrets.token_urlsafe(16)
+
+    # 一時トークンをRedisに保存（5分間有効）
+    try:
+        r.setex(f"auth_token:{auth_token}", 300, json.dumps({
+            "user_id": user_id,
+            "line_user_id": line_user_id,
+            "display_name": display_name
+        }))
+    except Exception as e:
+        logger.warning(f"Failed to save auth token to Redis: {e}")
+
+    redirect_url = f"{web_app_url}?auth_token={auth_token}"
+    response = RedirectResponse(url=redirect_url, status_code=302)
+
+    # Cookieをセット（ブラウザがAPIドメインのCookieを保持）
+    response.set_cookie(
+        key="session_id",
+        value=session_id,
+        httponly=True,
+        path="/",
+        samesite="lax",
+        max_age=86400  # 24時間
+    )
+    response.set_cookie(
+        key="user_id",
+        value=user_id,
+        httponly=False,  # JSからアクセス可能にする
+        path="/",
+        samesite="lax",
+        max_age=86400
+    )
+
+    logger.info(f"LINE auth successful for user {user_id}, redirecting to {web_app_url}")
+    return response
+
+
+@app.get("/api/v1/auth/verify-token")
+async def verify_auth_token(token: str = Query(..., description="Temporary auth token")):
+    """
+    一時認証トークンを検証し、ユーザー情報を返す。
+    UI側でログイン状態を復元するために使用。
+    """
+    try:
+        redis_url = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
+        r = redis.from_url(redis_url)
+        token_data = r.get(f"auth_token:{token}")
+
+        if token_data:
+            # トークンを消費（1回限り有効）
+            r.delete(f"auth_token:{token}")
+            user_info = json.loads(token_data)
+            return {
+                "valid": True,
+                "user_id": user_info.get("user_id"),
+                "line_user_id": user_info.get("line_user_id"),
+                "display_name": user_info.get("display_name")
+            }
+    except Exception as e:
+        logger.error(f"Failed to verify auth token: {e}")
+
+    return {"valid": False, "user_id": None}
+
+
+@app.post("/api/v1/hypothesis/draft")
+async def generate_hypothesis_draft(request: HypothesisDraftRequest):
+    """
+    Chrome拡張から送信されたWebページ内容を解析し、
+    仮説ドラフト（statement, context, conditions）を自動生成する。
+    """
+    ai_client = AIClient()
+
+    # プロンプトテンプレートを読み込み
+    prompt_path = Path(__file__).resolve().parents[1] / "static/prompts/hypothesis_draft.txt"
+    try:
+        prompt_template = PromptTemplate.from_file(prompt_path)
+    except Exception as e:
+        logger.error(f"Failed to load prompt template: {e}")
+        raise HTTPException(status_code=500, detail="Prompt template not found")
+
+    # コンテンツが長すぎる場合は切り詰め
+    content = request.content
+    max_content_length = 8000  # トークン数を考慮
+    if len(content) > max_content_length:
+        content = content[:max_content_length] + "\n...(以下省略)"
+
+    # プロンプトを作成
+    prompt = prompt_template.format(
+        url=request.url,
+        title=request.title,
+        content=content
+    )
+
+    # AIによる仮説ドラフト生成
+    try:
+        result = ai_client.generate_response(
+            prompt,
+            model=MODEL_HYPOTHESIS_GENERATION
+        )
+    except Exception as e:
+        logger.error(f"AI generation failed: {e}")
+        raise HTTPException(status_code=500, detail="AI generation failed")
+
+    if not result:
+        logger.warning("Empty result from AI")
+        # フォールバック: 基本的な構造を返す
+        return {
+            "statement": f"「{request.title}」に関する仮説",
+            "context": "このページの内容から仮説を抽出してください。",
+            "conditions": "",
+            "tags": []
+        }
+
+    # 結果を整形して返す
+    return {
+        "statement": result.get("statement", ""),
+        "context": result.get("context", ""),
+        "conditions": result.get("conditions", ""),
+        "tags": result.get("tags", [])
+    }
+
+
+# =============================================================================
+# Team Brain API Endpoints
+# =============================================================================
+
+def get_team_brain_manager() -> TeamBrainManager:
+    """Get TeamBrainManager instance."""
+    ai_client = AIClient()
+    return TeamBrainManager(ai_client)
+
+
+# ---------------------------------------------------------------------------
+# 1階: 思考の私有地 (Private Layer) - FR-103, FR-104
+# ---------------------------------------------------------------------------
+
+@app.post("/api/v1/team-brain/hypotheses/incubate")
+async def incubate_hypothesis(request: HypothesisIncubateRequest):
+    """
+    経験から仮説を生成する（FR-103: 仮説形成アシスタント）
+    """
+    manager = get_team_brain_manager()
+    result = manager.incubate_hypothesis(
+        user_id=request.user_id,
+        experience=request.experience,
+        interest_profile=request.interest_profile,
+        auto_score=request.auto_score,
+        check_sharing=request.check_sharing
+    )
+    return result
+
+
+@app.post("/api/v1/team-brain/hypotheses/refine")
+async def refine_hypothesis(request: HypothesisRefineRequest):
+    """
+    仮説をブラッシュアップする（壁打ち）
+    """
+    manager = get_team_brain_manager()
+    result = manager.refine_hypothesis(
+        user_id=request.user_id,
+        hypothesis_id=request.hypothesis_id,
+        feedback=request.feedback
+    )
+    return result
+
+
+@app.get("/api/v1/team-brain/hypotheses/my")
+async def get_my_hypotheses(
+    user_id: str = Query(..., description="User ID"),
+    status: Optional[str] = Query(None, description="Filter by status (DRAFT, PROPOSED, SHARED)"),
+    verification_state: Optional[str] = Query(None, description="Filter by verification state"),
+    limit: int = Query(50, ge=1, le=100)
+):
+    """
+    自分の仮説一覧を取得する
+    """
+    manager = get_team_brain_manager()
+    hypotheses = manager.get_my_hypotheses(
+        user_id=user_id,
+        status=status,
+        verification_state=verification_state,
+        limit=limit
+    )
+    return {"hypotheses": hypotheses}
+
+
+@app.post("/api/v1/team-brain/hypotheses/verification-state")
+async def update_hypothesis_verification_state(request: HypothesisUpdateVerificationRequest):
+    """
+    仮説の検証ステータスを更新する（FR-104: 検証ステータス管理）
+    """
+    manager = get_team_brain_manager()
+    result = manager.update_verification_state(
+        user_id=request.user_id,
+        hypothesis_id=request.hypothesis_id,
+        verification_state=request.verification_state,
+        notes=request.notes
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 2階: 情報の関所 (Gateway Layer) - FR-201, FR-202
+# ---------------------------------------------------------------------------
+
+@app.post("/api/v1/team-brain/hypotheses/{hypothesis_id}/score")
+async def score_hypothesis(hypothesis_id: str):
+    """
+    仮説の品質をスコアリングする（FR-201: 仮説品質スコアリング）
+    """
+    manager = get_team_brain_manager()
+    result = manager.score_hypothesis(hypothesis_id)
+    return result
+
+
+@app.get("/api/v1/team-brain/suggestions/pending")
+async def get_pending_suggestions(user_id: str = Query(..., description="User ID")):
+    """
+    保留中の共有サジェストを取得する（FR-202）
+    """
+    manager = get_team_brain_manager()
+    suggestions = manager.get_pending_suggestions(user_id)
+    return {"suggestions": suggestions}
+
+
+@app.post("/api/v1/team-brain/suggestions/respond")
+async def respond_to_suggestion(request: SuggestionResponseRequest):
+    """
+    共有サジェストに応答する（FR-202: 承認フロー）
+    """
+    manager = get_team_brain_manager()
+    result = manager.respond_to_suggestion(
+        suggestion_id=request.suggestion_id,
+        user_id=request.user_id,
+        action=request.action,
+        edited_content=request.edited_content,
+        team_id=request.team_id
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 3階: 共創の広場 (Public Layer) - FR-301
+# ---------------------------------------------------------------------------
+
+@app.get("/api/v1/team-brain/hypotheses/shared")
+async def get_shared_hypotheses(
+    team_id: Optional[str] = Query(None, description="Filter by team"),
+    verification_state: Optional[str] = Query(None, description="Filter by verification state"),
+    limit: int = Query(50, ge=1, le=100)
+):
+    """
+    共有された仮説バンクを取得する（FR-301）
+    """
+    manager = get_team_brain_manager()
+    hypotheses = manager.get_shared_hypotheses(
+        team_id=team_id,
+        verification_state=verification_state,
+        limit=limit
+    )
+    return {"hypotheses": hypotheses}
+
+
+@app.post("/api/v1/team-brain/hypotheses/verify")
+async def add_verification(request: AddVerificationRequest):
+    """
+    仮説に検証結果を追加する（FR-301: 検証ステータス共有）
+    """
+    manager = get_team_brain_manager()
+    result = manager.add_verification(
+        user_id=request.user_id,
+        hypothesis_id=request.hypothesis_id,
+        verification_result=request.verification_result,
+        conditions=request.conditions,
+        notes=request.notes,
+        evidence=request.evidence,
+        team_id=request.team_id
+    )
+    return result
+
+
+@app.get("/api/v1/team-brain/hypotheses/{hypothesis_id}/verifications")
+async def get_hypothesis_verifications(hypothesis_id: str):
+    """
+    仮説の検証履歴を取得する
+    """
+    manager = get_team_brain_manager()
+    result = manager.get_hypothesis_verifications(hypothesis_id)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 循環型RAG (Cross-Layer RAG) - FR-401, FR-402
+# ---------------------------------------------------------------------------
+
+@app.post("/api/v1/team-brain/think")
+async def think_with_collective_wisdom(request: CollectiveWisdomRequest):
+    """
+    組織の集合知を活用してアドバイスを取得する（FR-401: ステータス考慮型RAG）
+    """
+    manager = get_team_brain_manager()
+    result = manager.think_with_collective_wisdom(
+        user_id=request.user_id,
+        thought=request.thought,
+        category=request.category
+    )
+    return result
+
+
+@app.post("/api/v1/team-brain/differential/suggest")
+async def suggest_differential_verification(request: DifferentialVerificationRequest):
+    """
+    差分検証を提案する（FR-402）
+    """
+    manager = get_team_brain_manager()
+    result = manager.suggest_differential_verification(
+        user_id=request.user_id,
+        hypothesis_id=request.hypothesis_id,
+        new_conditions=request.new_conditions
+    )
+    return result
+
+
+@app.post("/api/v1/team-brain/differential/record")
+async def record_differential_verification(request: RecordDifferentialRequest):
+    """
+    差分検証結果を記録する（FR-402）
+    """
+    manager = get_team_brain_manager()
+    result = manager.record_differential_verification(
+        user_id=request.user_id,
+        parent_hypothesis_id=request.parent_hypothesis_id,
+        verification_result=request.verification_result,
+        conditions=request.conditions,
+        notes=request.notes,
+        evidence=request.evidence,
+        team_id=request.team_id
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# チーム管理
+# ---------------------------------------------------------------------------
+
+@app.post("/api/v1/team-brain/teams")
+async def create_team(request: CreateTeamRequest):
+    """
+    チームを作成する
+    """
+    manager = get_team_brain_manager()
+    result = manager.create_team(
+        name=request.name,
+        created_by=request.created_by,
+        description=request.description
+    )
+    return result
+
+
+@app.get("/api/v1/team-brain/teams")
+async def get_my_teams(user_id: str = Query(..., description="User ID")):
+    """
+    所属チーム一覧を取得する
+    """
+    manager = get_team_brain_manager()
+    teams = manager.get_my_teams(user_id)
+    return {"teams": teams}
+
+
+@app.post("/api/v1/team-brain/teams/members")
+async def add_team_member(request: AddTeamMemberRequest):
+    """
+    チームにメンバーを追加する
+    """
+    manager = get_team_brain_manager()
+    result = manager.add_team_member(
+        team_id=request.team_id,
+        user_id=request.user_id,
+        role=request.role
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# ダッシュボード
+# ---------------------------------------------------------------------------
+
+@app.get("/api/v1/team-brain/dashboard/stats")
+async def get_team_brain_stats(user_id: str = Query(..., description="User ID")):
+    """
+    Team Brain ダッシュボード用統計情報を取得する
+    """
+    manager = get_team_brain_manager()
+    stats = manager.get_dashboard_stats(user_id)
+    return stats
+
 
 if __name__ == "__main__":
     import uvicorn

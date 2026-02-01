@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Team Brain - 仮説キャプチャ</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1>Team Brain</h1>
+      <p class="subtitle">仮説キャプチャ</p>
+    </header>
+
+    <!-- ローディング表示 -->
+    <div id="loading" class="loading">
+      <div class="spinner"></div>
+      <p>ページを解析中...</p>
+      <p class="loading-hint">AIが仮説を生成しています</p>
+    </div>
+
+    <!-- ログイン必要 -->
+    <div id="login-required" class="login-required hidden">
+      <div class="login-icon">🔐</div>
+      <p class="login-title">ログインが必要です</p>
+      <p class="login-message">
+        Team Brain Webアプリにログインしてから<br>
+        拡張機能をご利用ください。
+      </p>
+      <button id="login-btn" class="btn btn-primary">
+        Webアプリを開く
+      </button>
+      <p class="login-hint">
+        ログイン後、このポップアップを再度開いてください
+      </p>
+    </div>
+
+    <!-- エラー表示 -->
+    <div id="error" class="error hidden">
+      <p class="error-title">エラーが発生しました</p>
+      <p id="error-message"></p>
+      <button id="retry-btn" class="btn btn-secondary">再試行</button>
+    </div>
+
+    <!-- メインフォーム -->
+    <form id="hypothesis-form" class="form hidden">
+      <!-- ページ情報 -->
+      <div class="page-info">
+        <p class="page-title" id="page-title"></p>
+        <a class="page-url" id="page-url" href="#" target="_blank"></a>
+      </div>
+
+      <!-- Statement (仮説の核心) -->
+      <div class="form-group">
+        <label for="statement">
+          仮説 (Statement)
+          <span class="required">*</span>
+        </label>
+        <textarea
+          id="statement"
+          name="statement"
+          rows="3"
+          placeholder="〜は〜である、〜すれば〜になる 等の形式で記述"
+          required
+        ></textarea>
+        <p class="hint">記事から導き出される核心的な仮説を記述してください</p>
+      </div>
+
+      <!-- Context (背景・文脈) -->
+      <div class="form-group">
+        <label for="context">
+          背景・文脈 (Context)
+        </label>
+        <textarea
+          id="context"
+          name="context"
+          rows="4"
+          placeholder="この仮説が生まれた背景、元記事の要約など"
+        ></textarea>
+        <p class="hint">仮説の根拠となる情報や、記事の要点を記述してください</p>
+      </div>
+
+      <!-- Conditions (成立条件) -->
+      <div class="form-group">
+        <label for="conditions">
+          成立条件 (Conditions)
+        </label>
+        <textarea
+          id="conditions"
+          name="conditions"
+          rows="3"
+          placeholder="特定の技術スタック、組織フェーズ、市場環境など"
+        ></textarea>
+        <p class="hint">仮説が成立するための前提条件や制約事項を記述してください</p>
+      </div>
+
+      <!-- タグ -->
+      <div class="form-group">
+        <label for="tags">タグ</label>
+        <input
+          type="text"
+          id="tags"
+          name="tags"
+          placeholder="カンマ区切りで入力（例: AI, 生産性, チーム開発）"
+        >
+      </div>
+
+      <!-- アクションボタン -->
+      <div class="actions">
+        <button type="button" id="regenerate-btn" class="btn btn-secondary">
+          再生成
+        </button>
+        <button type="submit" class="btn btn-primary">
+          保存
+        </button>
+      </div>
+    </form>
+
+    <!-- 成功メッセージ -->
+    <div id="success" class="success hidden">
+      <div class="success-icon">✓</div>
+      <p class="success-title">仮説を保存しました</p>
+      <p class="success-hint">Team Brainの「思考の私有地」で確認できます</p>
+      <button id="close-btn" class="btn btn-primary">閉じる</button>
+    </div>
+
+    <!-- 設定 -->
+    <footer class="footer">
+      <button id="settings-btn" class="settings-btn" title="設定">⚙️</button>
+    </footer>
+
+    <!-- 設定モーダル -->
+    <div id="settings-modal" class="modal hidden">
+      <div class="modal-content">
+        <h2>設定</h2>
+        <div class="form-group">
+          <label for="api-url">API URL</label>
+          <input
+            type="text"
+            id="api-url"
+            placeholder="自動設定されます"
+          >
+          <p class="hint">通常は変更不要です</p>
+        </div>
+        <div class="form-group">
+          <label for="user-id">ユーザーID（オプション）</label>
+          <input
+            type="text"
+            id="user-id"
+            placeholder="Webアプリで自動取得されます"
+          >
+          <p class="hint">手動で設定する場合のみ入力</p>
+        </div>
+        <div class="modal-actions">
+          <button id="settings-cancel" class="btn btn-secondary">キャンセル</button>
+          <button id="settings-save" class="btn btn-primary">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 設定ファイルを先に読み込み -->
+  <script src="config.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

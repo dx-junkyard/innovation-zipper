@@ -1,0 +1,13 @@
+{
+  "name": "innovation-zipper",
+  "version": "1.0.0",
+  "description": "Team Brain - Knowledge Management System",
+  "scripts": {
+    "build:extension": "cd extension && node scripts/build.js"
+  },
+  "keywords": [
+    "team-brain",
+    "knowledge-management"
+  ],
+  "license": "MIT"
+}
