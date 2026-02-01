@@ -67,38 +67,39 @@ CLOUD_EMBEDDING_DIMENSION = 1536         # text-embedding-3-small dimension
 
 class Settings(BaseSettings):
     # --- Local LLM Configuration ---
-    LOCAL_MODEL_FAST: str = LOCAL_MODEL_FAST
-    LOCAL_MODEL_SMART: str = LOCAL_MODEL_SMART
-    LOCAL_EMBEDDING_MODEL: str = LOCAL_EMBEDDING_MODEL
-    LOCAL_EMBEDDING_DIMENSION: int = LOCAL_EMBEDDING_DIMENSION
-    AI_URL: str = "http://host.docker.internal:11434"
+    # All values are loaded from .env file (no hardcoded defaults for credentials)
+    LOCAL_MODEL_FAST: str
+    LOCAL_MODEL_SMART: str
+    LOCAL_EMBEDDING_MODEL: str
+    LOCAL_EMBEDDING_DIMENSION: int
+    AI_URL: str
 
     # --- Cloud LLM Configuration (OpenAI) ---
-    CLOUD_MODEL_FAST: str = CLOUD_MODEL_FAST
-    CLOUD_MODEL_SMART: str = CLOUD_MODEL_SMART
-    CLOUD_EMBEDDING_MODEL: str = CLOUD_EMBEDDING_MODEL
-    CLOUD_EMBEDDING_DIMENSION: int = CLOUD_EMBEDDING_DIMENSION
+    CLOUD_MODEL_FAST: str
+    CLOUD_MODEL_SMART: str
+    CLOUD_EMBEDDING_MODEL: str
+    CLOUD_EMBEDDING_DIMENSION: int
 
     # --- Legacy Settings (for backward compatibility) ---
-    LLM_MODEL: str = "gpt-5-mini"  # Deprecated: Use task-specific configs
-    EMBEDDING_MODEL: str = "text-embedding-3-small"  # Deprecated
-    EMBEDDING_DIMENSION: int = 1536  # Deprecated
+    LLM_MODEL: str  # Deprecated: Use task-specific configs
+    EMBEDDING_MODEL: str  # Deprecated
+    EMBEDDING_DIMENSION: int  # Deprecated
 
     # --- DB Configuration ---
-    DB_HOST: str = "db"
-    DB_USER: str = "me"
-    DB_PASSWORD: str = "me"
-    DB_NAME: str = "mydb"
-    DB_PORT: int = 3306
+    DB_HOST: str
+    DB_USER: str
+    DB_PASSWORD: str
+    DB_NAME: str
+    DB_PORT: int
 
     # --- S3 / MinIO Configuration ---
-    S3_ENDPOINT_URL: str = "http://minio:9000" # Docker network alias
-    S3_PUBLIC_ENDPOINT_URL: str = "http://localhost:9000" # ブラウザから見た外部URL (New)
-    S3_ACCESS_KEY: str = "minioadmin"
-    S3_SECRET_KEY: str = "minioadminpassword"
-    S3_BUCKET_NAME: str = "user-files"
-    S3_REGION_NAME: str = "us-east-1" # MinIO default
-    S3_USE_SSL: bool = False
+    S3_ENDPOINT_URL: str
+    S3_PUBLIC_ENDPOINT_URL: str
+    S3_ACCESS_KEY: str
+    S3_SECRET_KEY: str
+    S3_BUCKET_NAME: str
+    S3_REGION_NAME: str
+    S3_USE_SSL: bool
 
 settings = Settings()
 
